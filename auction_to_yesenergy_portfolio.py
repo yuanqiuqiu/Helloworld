@@ -5,7 +5,6 @@ import pandas as pd
 
 
 ROOTPATH = r"G:\Power\MISO\FTR Results"
-AUCTION_YEAR = "2025-26"
 AUCTION_TYPE = "Monthly"
 AUCTION_NAME = "May26"
 AUCTION_FOLDER = "2026_05"
@@ -52,7 +51,7 @@ YE_COLS = [
 ]
 
 # Extra master-file columns keep imports traceable and make repeated runs safer.
-MASTER_METADATA_COLS = ["auctionyear", "auctiontype", "auctionname", "sourcefile"]
+MASTER_METADATA_COLS = ["auctiontype", "auctionname", "sourcefile"]
 MASTER_COLS = YE_COLS + MASTER_METADATA_COLS
 
 AGGREGATION_KEYS = ["sourcename", "sinkname", "peaktype", "contractstartdate"]
@@ -66,7 +65,6 @@ def parse_args():
         )
     )
     parser.add_argument("--rootpath", default=ROOTPATH)
-    parser.add_argument("--auction-year", default=AUCTION_YEAR)
     parser.add_argument("--auction-type", default=AUCTION_TYPE)
     parser.add_argument("--auction-name", default=AUCTION_NAME)
     parser.add_argument("--auction-folder", default=AUCTION_FOLDER)
@@ -354,7 +352,6 @@ def main():
     for filepath in result_files:
         print(f"Processing: {filepath.name}")
         metadata = {
-            "auctionyear": args.auction_year,
             "auctiontype": args.auction_type,
             "auctionname": args.auction_name,
             "sourcefile": filepath.name,
