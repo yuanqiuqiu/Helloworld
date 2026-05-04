@@ -350,12 +350,18 @@ def main():
     if expired_count:
         print(f"Deleted {expired_count} expired master row(s)")
 
-    portfolio = aggregate_yesenergy_portfolio(active_master, auction_date)
+    prompt_month_master = active_master[
+        active_master["contractstartdate"] == prompt_month_start
+    ].copy()
+    portfolio = aggregate_yesenergy_portfolio(prompt_month_master, auction_date)
 
     write_table(format_output_dates(portfolio), output_file, "Portfolio")
     write_table(format_output_dates(active_master), master_file, "Master")
 
-    print(f"Saved YesEnergy portfolio: {output_file} ({len(portfolio)} row(s))")
+    print(
+        f"Saved prompt-month YesEnergy portfolio: {output_file} "
+        f"({len(portfolio)} row(s))"
+    )
     print(f"Saved active master file: {master_file} ({len(active_master)} row(s))")
     print("Done.")
 
