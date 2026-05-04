@@ -9,7 +9,7 @@ AUCTION_TYPE = "Monthly"
 AUCTION_NAME = "May26"
 AUCTION_FOLDER = "2026_05"
 AUCTION_DATE = "05/01/2026"
-PORTFOLIO_MONTH = "05/01/2026"
+PORTFOLIO_MONTH = ["05/01/2026"]
 
 RESULTS_SUBFOLDER = "Private"
 AWARDED_PATH_FOLDER = r"C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path"
@@ -72,11 +72,11 @@ def parse_args():
     parser.add_argument("--auction-date", default=AUCTION_DATE)
     parser.add_argument(
         "--portfolio-month",
+        nargs="+",
         default=PORTFOLIO_MONTH,
         help=(
-            "Month to include in the regular YesEnergy output. Use the first "
-            "day of the target month, e.g. 06/01/2026 for an annual-auction "
-            "quarter that shares auction date 04/01/2026."
+            "Month(s) to include in selected YesEnergy outputs. Use first-day "
+            "dates, e.g. --portfolio-month 06/01/2026 09/01/2026 12/01/2026."
         ),
     )
     parser.add_argument("--awarded-path-folder", default=AWARDED_PATH_FOLDER)
@@ -100,6 +100,33 @@ def first_day_of_month(value):
 
 def portfolio_month_file_prefix(portfolio_month_start):
     return portfolio_month_start.strftime("%Y_%m")
+
+
+def parse_portfolio_months(values):
+    if isinstance(values, str):
+        raw_values = [values]
+    else:
+        raw_values = list(values)
+
+    month_values = []
+    for value in raw_values:
+        month_values.extend(
+            token.strip()
+            for token in str(value).replace(";", ",").split(",")
+            if token.strip()
+        )
+
+    if not month_values:
+        raise ValueError("At least one --portfolio-month value is required")
+
+    portfolio_months = []
+    for value in month_values:
+        month_start = first_day_of_month(value)
+        if pd.isna(month_start):
+            raise ValueError(f"Unable to parse --portfolio-month as a date: {value}")
+        portfolio_months.append(month_start)
+
+    return sorted(pd.unique(portfolio_months))
 
 
 def determine_contract_type(start_date, end_date):
@@ -388,20 +415,9 @@ def main():
         else awarded_path_folder / COMBINED_PATHS_FILE_NAME
     )
     auction_date = pd.to_datetime(args.auction_date, errors="raise")
-    portfolio_month_start = first_day_of_month(args.portfolio_month)
-    if pd.isna(portfolio_month_start):
-        raise ValueError(
-            f"Unable to parse --portfolio-month as a date: {args.portfolio_month}"
-        )
-    output_file = (
-        Path(args.output_file)
-        if args.output_file
-        else awarded_path_folder
-        / (
-            f"{portfolio_month_file_prefix(portfolio_month_start)}_"
-            f"{args.auction_name}{OUTPUT_FILE_SUFFIX}"
-        )
-    )
+    portfolio_month_starts = parse_portfolio_months(args.portfolio_month)
+    if args.output_file and len(portfolio_month_starts) > 1:
+        raise ValueError("--output-file can only be used with one --portfolio-month")
 
     result_files = find_result_files(results_folder)
     if not result_files:
@@ -447,23 +463,37 @@ def main():
             f"{current_month_start.strftime('%m/%d/%Y')}"
         )
 
-    portfolio_month_master = active_master[
-        active_master["contractstartdate"] == portfolio_month_start
-    ].copy()
-    portfolio = aggregate_yesenergy_portfolio(portfolio_month_master, auction_date)
+    selected_outputs = []
+    for portfolio_month_start in portfolio_month_starts:
+        output_file = (
+            Path(args.output_file)
+            if args.output_file
+            else awarded_path_folder
+            / (
+                f"{portfolio_month_file_prefix(portfolio_month_start)}_"
+                f"{args.auction_name}{OUTPUT_FILE_SUFFIX}"
+            )
+        )
+        portfolio_month_master = active_master[
+            active_master["contractstartdate"] == portfolio_month_start
+        ].copy()
+        portfolio = aggregate_yesenergy_portfolio(portfolio_month_master, auction_date)
+        write_table(format_output_dates(portfolio), output_file, "Portfolio")
+        selected_outputs.append((portfolio_month_start, output_file, len(portfolio)))
+
     all_portfolio = aggregate_all_paths(active_master)
     combined_paths = aggregate_yesenergy_portfolio(active_master, auction_date)
 
-    write_table(format_output_dates(portfolio), output_file, "Portfolio")
     write_table(format_output_dates(all_portfolio), all_output_file, "Portfolio")
     write_table(format_output_dates(combined_paths), combined_paths_file, "Portfolio")
     write_table(format_output_dates(active_master), master_file, "Master")
 
-    print(
-        f"Saved {portfolio_month_start.strftime('%m/%d/%Y')} YesEnergy portfolio: "
-        f"{output_file} "
-        f"({len(portfolio)} row(s))"
-    )
+    for portfolio_month_start, output_file, row_count in selected_outputs:
+        print(
+            f"Saved {portfolio_month_start.strftime('%m/%d/%Y')} YesEnergy portfolio: "
+            f"{output_file} "
+            f"({row_count} row(s))"
+        )
     print(
         f"Saved all-active YesEnergy portfolio: {all_output_file} "
         f"({len(all_portfolio)} row(s))"
