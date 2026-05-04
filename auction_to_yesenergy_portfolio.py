@@ -153,6 +153,13 @@ def build_monthly_yesenergy_rows(row, auction_date, metadata):
     return rows
 
 
+def normalize_awarded_mw(df):
+    df = df.copy()
+    sell_mask = df["Type"].astype(str).str.strip().str.upper() == "SELL"
+    df.loc[sell_mask, "AwardedMW"] = -df.loc[sell_mask, "AwardedMW"].abs()
+    return df
+
+
 def process_result_file(filepath, auction_date, metadata):
     """
     Read one AUCTION_PRIVATE_RESULTS CSV, expand all awards to monthly rows,
@@ -170,6 +177,7 @@ def process_result_file(filepath, auction_date, metadata):
     df["EndDate"] = pd.to_datetime(df["EndDate"], errors="coerce")
     df["AwardedMW"] = pd.to_numeric(df["AwardedMW"], errors="coerce")
     df["ClearingPrice"] = pd.to_numeric(df["ClearingPrice"], errors="coerce")
+    df = normalize_awarded_mw(df)
 
     df.dropna(inplace=True)
     df = df[df["AwardedMW"] != 0]
