@@ -15,7 +15,6 @@ RESULTS_SUBFOLDER = "Private"
 AWARDED_PATH_FOLDER = r"C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path"
 MASTER_FILE_NAME = "awarded_paths_master.xlsx"
 OUTPUT_FILE_SUFFIX = "_yesenergy_portfolio.xlsx"
-ALL_OUTPUT_FILE_NAME = "all_yesenergy_portfolio.xlsx"
 COMBINED_PATHS_FILE_NAME = "awarded_combined_paths.xlsx"
 
 # Columns to extract from each result file.
@@ -83,7 +82,6 @@ def parse_args():
     parser.add_argument("--results-folder")
     parser.add_argument("--master-file")
     parser.add_argument("--output-file")
-    parser.add_argument("--all-output-file")
     parser.add_argument("--combined-paths-file")
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
@@ -349,52 +347,6 @@ def aggregate_yesenergy_portfolio(active_master, auction_date):
     )
 
 
-def aggregate_all_paths(active_master):
-    """
-    Aggregate active master rows across all contract months.
-
-    This latest-only summary ignores contract dates and combines rows by path and
-    peak type. If a grouped row spans multiple dates or source auctions, those
-    fields are marked as Combined because the row is no longer month-specific.
-    """
-    if active_master.empty:
-        return pd.DataFrame(columns=YE_COLS)
-
-    rows = []
-    group_keys = ["sourcename", "sinkname", "peaktype"]
-    for keys, group in active_master.groupby(group_keys, dropna=False, sort=True):
-        sourcename, sinkname, peaktype = keys
-        pathsize = group["pathsize"].sum()
-        price = weighted_price(group)
-        if pathsize == 0 or pd.isna(price):
-            continue
-
-        rows.append(
-            {
-                "ISO": pick_output_value(group["ISO"], "MISO"),
-                "portfolioname": pick_output_value(group["portfolioname"]),
-                "bookname": pick_output_value(group["bookname"], "joanna"),
-                "sourcename": sourcename,
-                "sinkname": sinkname,
-                "peaktype": peaktype,
-                "hedgetype": pick_output_value(group["hedgetype"], "Obligation"),
-                "tradetype": pick_output_value(group["tradetype"]),
-                "contractstartdate": pick_output_value(group["contractstartdate"]),
-                "auctiondate": pick_output_value(group["auctiondate"]),
-                "contracttype": "M",
-                "round": pick_output_value(group["round"]),
-                "pathsize": pathsize,
-                "costoverride ($/MW)": price,
-            }
-        )
-
-    result = pd.DataFrame(rows, columns=YE_COLS)
-    if result.empty:
-        return result
-
-    return result.sort_values(["peaktype", "sourcename", "sinkname"], kind="stable")
-
-
 def main():
     args = parse_args()
 
@@ -409,11 +361,6 @@ def main():
         Path(args.master_file)
         if args.master_file
         else awarded_path_folder / MASTER_FILE_NAME
-    )
-    all_output_file = (
-        Path(args.all_output_file)
-        if args.all_output_file
-        else awarded_path_folder / ALL_OUTPUT_FILE_NAME
     )
     combined_paths_file = (
         Path(args.combined_paths_file)
@@ -487,10 +434,8 @@ def main():
         write_table(format_output_dates(portfolio), output_file, "Portfolio")
         selected_outputs.append((portfolio_month_start, output_file, len(portfolio)))
 
-    all_portfolio = aggregate_all_paths(active_master)
     combined_paths = aggregate_yesenergy_portfolio(active_master, auction_date)
 
-    write_table(format_output_dates(all_portfolio), all_output_file, "Portfolio")
     write_table(format_output_dates(combined_paths), combined_paths_file, "Portfolio")
     write_table(format_output_dates(active_master), master_file, "Master")
 
@@ -500,10 +445,6 @@ def main():
             f"{output_file} "
             f"({row_count} row(s))"
         )
-    print(
-        f"Saved all-active YesEnergy portfolio: {all_output_file} "
-        f"({len(all_portfolio)} row(s))"
-    )
     print(
         f"Saved monthly combined awarded paths: {combined_paths_file} "
         f"({len(combined_paths)} row(s))"

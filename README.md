@@ -26,13 +26,12 @@ python3 auction_to_yesenergy_portfolio.py \
 The script reads `AUCTION_PRIVATE_RESULTS*.csv` files from the auction
 `Private` folder, updates `awarded_paths_master.xlsx` in the awarded-path
 folder, removes paths with `contractstartdate` before the current system month,
-and writes three outputs to the same awarded-path folder:
+and writes selected-month YesEnergy outputs plus one combined-path workbook to
+the same awarded-path folder:
 
 - `{YYYY_MM}_{auction_name}_yesenergy_portfolio.xlsx` includes only rows for
   one selected `--portfolio-month`. If multiple months are configured, one file
   is written per month.
-- `all_yesenergy_portfolio.xlsx` is the latest all-active YesEnergy file,
-  combined by source, sink, and peak type across contract months.
 - `awarded_combined_paths.xlsx` includes all active monthly rows from the master
   file, combined by source, sink, peak type, and contract start date.
 
