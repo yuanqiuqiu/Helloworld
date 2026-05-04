@@ -83,7 +83,10 @@ def parse_args():
     parser.add_argument("--master-file")
     parser.add_argument("--output-file")
     parser.add_argument("--all-output-file")
-    return parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+    if unknown_args:
+        print(f"[INFO] Ignoring unknown argument(s): {' '.join(unknown_args)}")
+    return args
 
 
 def first_day_of_month(value):
