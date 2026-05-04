@@ -7,6 +7,7 @@ combine matching paths, and write a YesEnergy portfolio workbook.
 Default run:
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 auction_to_yesenergy_portfolio.py
 ```
 
