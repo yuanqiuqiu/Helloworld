@@ -126,7 +126,7 @@ def parse_portfolio_months(values):
             raise ValueError(f"Unable to parse --portfolio-month as a date: {value}")
         portfolio_months.append(month_start)
 
-    return sorted(pd.unique(portfolio_months))
+    return sorted(set(portfolio_months))
 
 
 def determine_contract_type(start_date, end_date):
