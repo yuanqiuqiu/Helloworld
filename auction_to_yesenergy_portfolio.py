@@ -15,8 +15,8 @@ PORTFOLIO_MONTH = "05/01/2026"
 RESULTS_SUBFOLDER = "Private"
 AWARDED_PATH_FOLDER = r"C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path"
 MASTER_FILE_NAME = "awarded_paths_master.xlsx"
-OUTPUT_FILE_NAME = f"{AUCTION_NAME}_yesenergy_portfolio.xlsx"
-ALL_OUTPUT_FILE_NAME = f"{AUCTION_NAME}_all_yesenergy_portfolio.xlsx"
+OUTPUT_FILE_SUFFIX = "_yesenergy_portfolio.xlsx"
+ALL_OUTPUT_FILE_SUFFIX = "_all_yesenergy_portfolio.xlsx"
 
 # Columns to extract from each result file.
 RESULT_COLS = [
@@ -318,12 +318,12 @@ def main():
     output_file = (
         Path(args.output_file)
         if args.output_file
-        else awarded_path_folder / OUTPUT_FILE_NAME
+        else awarded_path_folder / f"{args.auction_name}{OUTPUT_FILE_SUFFIX}"
     )
     all_output_file = (
         Path(args.all_output_file)
         if args.all_output_file
-        else awarded_path_folder / ALL_OUTPUT_FILE_NAME
+        else awarded_path_folder / f"{args.auction_name}{ALL_OUTPUT_FILE_SUFFIX}"
     )
     auction_date = pd.to_datetime(args.auction_date, errors="raise")
     portfolio_month_start = first_day_of_month(args.portfolio_month)
