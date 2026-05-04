@@ -282,9 +282,15 @@ def normalize_portfolio_frame(df):
 def format_output_dates(df):
     df = df.copy()
     for col in ["contractstartdate", "auctiondate"]:
-        parsed = pd.to_datetime(df[col], errors="coerce")
-        df[col] = parsed.dt.strftime("%m/%d/%Y").where(parsed.notna(), df[col])
+        df[col] = df[col].map(format_date_value)
     return df
+
+
+def format_date_value(value):
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return value
+    return parsed.strftime("%m/%d/%Y")
 
 
 def pick_output_value(values, fallback=""):
