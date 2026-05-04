@@ -10,11 +10,13 @@ AUCTION_TYPE = "Monthly"
 AUCTION_NAME = "May26"
 AUCTION_FOLDER = "2026_05"
 AUCTION_DATE = "05/01/2026"
+PORTFOLIO_MONTH = "05/01/2026"
 
 RESULTS_SUBFOLDER = "Private"
 AWARDED_PATH_FOLDER = r"C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path"
 MASTER_FILE_NAME = "awarded_paths_master.xlsx"
 OUTPUT_FILE_NAME = f"{AUCTION_NAME}_yesenergy_portfolio.xlsx"
+ALL_OUTPUT_FILE_NAME = f"{AUCTION_NAME}_all_yesenergy_portfolio.xlsx"
 
 # Columns to extract from each result file.
 RESULT_COLS = [
@@ -69,10 +71,20 @@ def parse_args():
     parser.add_argument("--auction-name", default=AUCTION_NAME)
     parser.add_argument("--auction-folder", default=AUCTION_FOLDER)
     parser.add_argument("--auction-date", default=AUCTION_DATE)
+    parser.add_argument(
+        "--portfolio-month",
+        default=PORTFOLIO_MONTH,
+        help=(
+            "Month to include in the regular YesEnergy output. Use the first "
+            "day of the target month, e.g. 06/01/2026 for an annual-auction "
+            "quarter that shares auction date 04/01/2026."
+        ),
+    )
     parser.add_argument("--awarded-path-folder", default=AWARDED_PATH_FOLDER)
     parser.add_argument("--results-folder")
     parser.add_argument("--master-file")
     parser.add_argument("--output-file")
+    parser.add_argument("--all-output-file")
     return parser.parse_args()
 
 
@@ -308,8 +320,17 @@ def main():
         if args.output_file
         else awarded_path_folder / OUTPUT_FILE_NAME
     )
+    all_output_file = (
+        Path(args.all_output_file)
+        if args.all_output_file
+        else awarded_path_folder / ALL_OUTPUT_FILE_NAME
+    )
     auction_date = pd.to_datetime(args.auction_date, errors="raise")
-    prompt_month_start = first_day_of_month(auction_date)
+    portfolio_month_start = first_day_of_month(args.portfolio_month)
+    if pd.isna(portfolio_month_start):
+        raise ValueError(
+            f"Unable to parse --portfolio-month as a date: {args.portfolio_month}"
+        )
 
     result_files = find_result_files(results_folder)
     if not result_files:
@@ -345,22 +366,31 @@ def main():
         print(f"Removed {before_dedupe - len(master)} duplicate master row(s)")
 
     before_expiry = len(master)
-    active_master = master[master["contractstartdate"] >= prompt_month_start].copy()
+    active_master = master[
+        master["contractstartdate"] >= portfolio_month_start
+    ].copy()
     expired_count = before_expiry - len(active_master)
     if expired_count:
         print(f"Deleted {expired_count} expired master row(s)")
 
-    prompt_month_master = active_master[
-        active_master["contractstartdate"] == prompt_month_start
+    portfolio_month_master = active_master[
+        active_master["contractstartdate"] == portfolio_month_start
     ].copy()
-    portfolio = aggregate_yesenergy_portfolio(prompt_month_master, auction_date)
+    portfolio = aggregate_yesenergy_portfolio(portfolio_month_master, auction_date)
+    all_portfolio = aggregate_yesenergy_portfolio(active_master, auction_date)
 
     write_table(format_output_dates(portfolio), output_file, "Portfolio")
+    write_table(format_output_dates(all_portfolio), all_output_file, "Portfolio")
     write_table(format_output_dates(active_master), master_file, "Master")
 
     print(
-        f"Saved prompt-month YesEnergy portfolio: {output_file} "
+        f"Saved {portfolio_month_start.strftime('%m/%d/%Y')} YesEnergy portfolio: "
+        f"{output_file} "
         f"({len(portfolio)} row(s))"
+    )
+    print(
+        f"Saved all-active YesEnergy portfolio: {all_output_file} "
+        f"({len(all_portfolio)} row(s))"
     )
     print(f"Saved active master file: {master_file} ({len(active_master)} row(s))")
     print("Done.")
