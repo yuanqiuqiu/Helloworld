@@ -12,7 +12,8 @@ AUCTION_FOLDER = "2026_05"
 AUCTION_DATE = "05/01/2026"
 
 RESULTS_SUBFOLDER = "Private"
-MASTER_FILE_NAME = "yesenergy_awarded_paths_master.xlsx"
+AWARDED_PATH_FOLDER = r"C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path"
+MASTER_FILE_NAME = "awarded_paths_master.xlsx"
 OUTPUT_FILE_NAME = f"{AUCTION_NAME}_yesenergy_portfolio.xlsx"
 
 # Columns to extract from each result file.
@@ -68,6 +69,7 @@ def parse_args():
     parser.add_argument("--auction-name", default=AUCTION_NAME)
     parser.add_argument("--auction-folder", default=AUCTION_FOLDER)
     parser.add_argument("--auction-date", default=AUCTION_DATE)
+    parser.add_argument("--awarded-path-folder", default=AWARDED_PATH_FOLDER)
     parser.add_argument("--results-folder")
     parser.add_argument("--master-file")
     parser.add_argument("--output-file")
@@ -295,11 +297,16 @@ def main():
         if args.results_folder
         else rootpath / args.auction_folder / RESULTS_SUBFOLDER
     )
-    master_file = Path(args.master_file) if args.master_file else rootpath / MASTER_FILE_NAME
+    awarded_path_folder = Path(args.awarded_path_folder)
+    master_file = (
+        Path(args.master_file)
+        if args.master_file
+        else awarded_path_folder / MASTER_FILE_NAME
+    )
     output_file = (
         Path(args.output_file)
         if args.output_file
-        else results_folder / OUTPUT_FILE_NAME
+        else awarded_path_folder / OUTPUT_FILE_NAME
     )
     auction_date = pd.to_datetime(args.auction_date, errors="raise")
     prompt_month_start = first_day_of_month(auction_date)

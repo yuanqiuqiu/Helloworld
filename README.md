@@ -16,12 +16,14 @@ Useful overrides:
 ```bash
 python3 auction_to_yesenergy_portfolio.py \
   --rootpath "G:\Power\MISO\FTR Results" \
+  --awarded-path-folder "C:\Users\joanna.wu\python_projects\MISO_auctions\awarded_path" \
   --auction-folder "2026_05" \
   --auction-name "May26" \
   --auction-date "05/01/2026"
 ```
 
 The script reads `AUCTION_PRIVATE_RESULTS*.csv` files from the auction
-`Private` folder, updates `yesenergy_awarded_paths_master.xlsx`, removes paths
-with `contractstartdate` before the prompt month, and writes the combined
-`*_yesenergy_portfolio.xlsx` output.
+`Private` folder, updates `awarded_paths_master.xlsx` in the awarded-path
+folder, removes paths with `contractstartdate` before the prompt month, and
+writes the combined `*_yesenergy_portfolio.xlsx` output to the same awarded-path
+folder.
