@@ -95,6 +95,10 @@ def first_day_of_month(value):
     return dt.to_period("M").to_timestamp()
 
 
+def portfolio_month_file_prefix(portfolio_month_start):
+    return portfolio_month_start.strftime("%Y_%m")
+
+
 def determine_contract_type(start_date, end_date):
     """Return 'Q' if the source award spans roughly a quarter, otherwise 'M'."""
     if pd.isna(start_date) or pd.isna(end_date):
@@ -315,11 +319,6 @@ def main():
         if args.master_file
         else awarded_path_folder / MASTER_FILE_NAME
     )
-    output_file = (
-        Path(args.output_file)
-        if args.output_file
-        else awarded_path_folder / f"{args.auction_name}{OUTPUT_FILE_SUFFIX}"
-    )
     all_output_file = (
         Path(args.all_output_file)
         if args.all_output_file
@@ -331,6 +330,15 @@ def main():
         raise ValueError(
             f"Unable to parse --portfolio-month as a date: {args.portfolio_month}"
         )
+    output_file = (
+        Path(args.output_file)
+        if args.output_file
+        else awarded_path_folder
+        / (
+            f"{portfolio_month_file_prefix(portfolio_month_start)}_"
+            f"{args.auction_name}{OUTPUT_FILE_SUFFIX}"
+        )
+    )
 
     result_files = find_result_files(results_folder)
     if not result_files:

@@ -28,7 +28,8 @@ The script reads `AUCTION_PRIVATE_RESULTS*.csv` files from the auction
 folder, removes paths with `contractstartdate` before the portfolio month, and
 writes two YesEnergy outputs to the same awarded-path folder:
 
-- `*_yesenergy_portfolio.xlsx` includes only rows for `--portfolio-month`.
+- `{YYYY_MM}_{auction_name}_yesenergy_portfolio.xlsx` includes only rows for
+  `--portfolio-month`.
 - `*_all_yesenergy_portfolio.xlsx` includes all active monthly rows from the
   master file.
 
