@@ -373,13 +373,17 @@ def main():
     if len(master) != before_dedupe:
         print(f"Removed {before_dedupe - len(master)} duplicate master row(s)")
 
+    current_month_start = first_day_of_month(pd.Timestamp.today())
     before_expiry = len(master)
     active_master = master[
-        master["contractstartdate"] >= portfolio_month_start
+        master["contractstartdate"] >= current_month_start
     ].copy()
     expired_count = before_expiry - len(active_master)
     if expired_count:
-        print(f"Deleted {expired_count} expired master row(s)")
+        print(
+            f"Deleted {expired_count} master row(s) before "
+            f"{current_month_start.strftime('%m/%d/%Y')}"
+        )
 
     portfolio_month_master = active_master[
         active_master["contractstartdate"] == portfolio_month_start
