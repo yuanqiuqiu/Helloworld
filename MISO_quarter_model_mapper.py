@@ -243,7 +243,7 @@ def find_planned_outage_file(
     *,
     hour_offset: int = 4,
 ) -> Path:
-    """Find the latest planned outage XML with filename hour matching the SE case."""
+    """Find the closest planned outage XML at or before the target filename hour."""
 
     se_time = parse_se_datetime(se_raw_file)
     adjusted_se_time = se_time + timedelta(hours=hour_offset)
@@ -252,7 +252,6 @@ def find_planned_outage_file(
 
     root = Path(planned_outage_root)
     candidates: list[PlannedOutageFile] = []
-    matches: list[PlannedOutageFile] = []
     for path in root.glob("**/*_Planned_Outages_*.xml"):
         if not path.is_file():
             continue
@@ -260,22 +259,31 @@ def find_planned_outage_file(
             outage_time = parse_planned_outage_timestamp(path)
         except ValueError:
             continue
-        if outage_time.date() <= target_date:
-            item = PlannedOutageFile(path, outage_time)
-            candidates.append(item)
-            if outage_time.hour == target_hour:
-                matches.append(item)
+        item = PlannedOutageFile(path, outage_time)
+        candidates.append(item)
 
-    if not matches:
-        available_hours = sorted({item.timestamp.hour for item in candidates})
-        hours_text = ", ".join(f"{hour:02d}" for hour in available_hours) if available_hours else "none"
-        raise FileNotFoundError(
-            f"No planned outage XML found for {se_raw_file} with filename hour {target_hour:02d}. "
-            f"Searched: {format_path_for_output(root)}. "
-            f"Available planned outage filename hours on/before {target_date:%Y-%m-%d}: {hours_text}. "
-            f"If the files use UTC+5 for this date, retry with --hour-offset 5."
-        )
-    return max(matches, key=lambda item: item.timestamp).path
+    hour_search_order = list(range(target_hour, -1, -1)) + list(range(23, target_hour, -1))
+    for hour in hour_search_order:
+        hour_matches = [
+            item
+            for item in candidates
+            if item.timestamp.hour == hour
+            and (
+                item.timestamp.date() < target_date
+                or (item.timestamp.date() == target_date and hour <= target_hour)
+            )
+        ]
+        if hour_matches:
+            return max(hour_matches, key=lambda item: item.timestamp).path
+
+    available_hours = sorted({item.timestamp.hour for item in candidates})
+    hours_text = ", ".join(f"{hour:02d}" for hour in available_hours) if available_hours else "none"
+    raise FileNotFoundError(
+        f"No planned outage XML found for {se_raw_file} at or before filename hour {target_hour:02d}. "
+        f"Searched: {format_path_for_output(root)}. "
+        f"Available planned outage filename hours: {hours_text}. "
+        f"If the files use UTC+5 for this date, retry with --hour-offset 5."
+    )
 
 
 def build_mapping(

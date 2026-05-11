@@ -169,12 +169,31 @@ class MisoModelMapperTests(unittest.TestCase):
 
             self.assertEqual(find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", root), target)
 
+    def test_find_planned_outage_file_falls_back_to_previous_hour(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "2308_Planned_Outages_2026-04-14-08-50-00.xml"
+            target.write_text("<Outages />", encoding="utf-8")
+            (root / "2308_Planned_Outages_2026-04-14-07-50-00.xml").write_text("<Outages />", encoding="utf-8")
+            (root / "2308_Planned_Outages_2026-04-14-10-50-00.xml").write_text("<Outages />", encoding="utf-8")
+
+            self.assertEqual(find_planned_outage_file("miso_se_20260414-0500_AREVA.raw", root), target)
+
+    def test_find_planned_outage_file_can_fall_back_to_previous_day(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "2308_Planned_Outages_2026-04-13-23-50-00.xml"
+            target.write_text("<Outages />", encoding="utf-8")
+            (root / "2308_Planned_Outages_2026-04-14-01-50-00.xml").write_text("<Outages />", encoding="utf-8")
+
+            self.assertEqual(find_planned_outage_file("miso_se_20260413-2000_AREVA.raw", root), target)
+
     def test_find_planned_outage_file_error_shows_available_hours(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "2308_Planned_Outages_2026-04-14-05-50-00.xml").write_text("<Outages />", encoding="utf-8")
 
-            with self.assertRaisesRegex(FileNotFoundError, "Available planned outage filename hours.*05"):
+            with self.assertRaisesRegex(FileNotFoundError, "at or before filename hour 04.*Available planned outage filename hours.*05"):
                 find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", root)
 
     def test_find_inputs_for_se_raw_returns_quarter_model_and_planned_outage_file(self):
