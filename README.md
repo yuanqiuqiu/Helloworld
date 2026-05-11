@@ -32,11 +32,19 @@ Multiple dates can be listed in one command:
 python MISO_SE_po_EMS_mapper.py --date 20260414 20240401
 ```
 
+Most runs can specify only the needed SE timestamps:
+
+```bash
+python MISO_SE_po_EMS_mapper.py --date "20260414 00" "20260418 018" "20260420 00" "20260420 05"
+```
+
+For date/hour inputs, only the matching SE raw file is mapped. For example,
+`"20260420 05"` maps `miso_se_20260420-0500_AREVA.raw`.
+
 This looks for:
 
 - `G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw`
-- four SE files matching
-  `G:\Power\MISO\MISO_SE\2026\miso_se_20260511-HHMM_AREVA.raw`
+- SE files matching either the whole date or the requested date/hour
 - planned outage XML files with filename hour = SE hour + 4
 
 Use a SE raw filename directly:

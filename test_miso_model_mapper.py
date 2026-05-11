@@ -9,12 +9,16 @@ from MISO_SE_po_EMS_mapper import (
     build_mapping,
     build_case_mappings,
     build_case_mappings_for_dates,
+    combine_unquoted_date_hours,
     expected_quarter_model,
     format_path_for_output,
     find_inputs_for_se_raw,
+    find_se_raw_file,
     find_planned_outage_file,
     find_quarter_model,
     find_se_raw_files,
+    normalize_se_time,
+    parse_date_request,
     parse_planned_outage_timestamp,
     parse_se_datetime,
     parse_study_date,
@@ -41,6 +45,24 @@ class MisoModelMapperTests(unittest.TestCase):
         self.assertEqual(
             parse_se_datetime(r"G:\Power\MISO\MISO_SE\2026\miso_se_20260427-0500_AREVA.raw").strftime("%Y%m%d-%H%M"),
             "20260427-0500",
+        )
+
+    def test_parse_date_request_accepts_optional_hour(self):
+        self.assertEqual(parse_date_request("20260414"), (date(2026, 4, 14), None))
+        self.assertEqual(parse_date_request("20260414 00"), (date(2026, 4, 14), "0000"))
+        self.assertEqual(parse_date_request("20260420 05"), (date(2026, 4, 20), "0500"))
+        self.assertEqual(parse_date_request("20260418 018"), (date(2026, 4, 18), "1800"))
+
+    def test_normalize_se_time_accepts_common_hour_forms(self):
+        self.assertEqual(normalize_se_time("0"), "0000")
+        self.assertEqual(normalize_se_time("05"), "0500")
+        self.assertEqual(normalize_se_time("018"), "1800")
+        self.assertEqual(normalize_se_time("1800"), "1800")
+
+    def test_combine_unquoted_date_hours(self):
+        self.assertEqual(
+            combine_unquoted_date_hours(["20260414", "00", "20260418", "018", "20260420"]),
+            ("20260414 00", "20260418 018", "20260420"),
         )
 
     def test_quarter_for_date_uses_expected_quarter_model_months(self):
@@ -108,6 +130,16 @@ class MisoModelMapperTests(unittest.TestCase):
 
             with self.assertRaises(FileNotFoundError):
                 find_se_raw_files(date(2026, 4, 27), root)
+
+    def test_find_se_raw_file_returns_one_requested_case(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "MISO_SE"
+            folder = root / "2026"
+            folder.mkdir(parents=True)
+            expected = folder / "miso_se_20260420-0500_AREVA.raw"
+            expected.write_text("raw", encoding="utf-8")
+
+            self.assertEqual(find_se_raw_file(date(2026, 4, 20), "0500", root), expected)
 
     def test_build_mapping_maps_se_date_to_quarter_model(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -304,6 +336,76 @@ class MisoModelMapperTests(unittest.TestCase):
             self.assertEqual(len(result), 8)
             self.assertEqual(result[0].se_time.strftime("%Y%m%d-%H%M"), "20260414-0000")
             self.assertEqual(result[-1].se_time.strftime("%Y%m%d-%H%M"), "20260415-1800")
+
+    def test_build_case_mappings_for_dates_accepts_date_hour_requests(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            model_root = root / "models"
+            model_file = model_root / "202603" / "Mar2026_final.raw"
+            model_file.parent.mkdir(parents=True)
+            model_file.write_text("raw", encoding="utf-8")
+
+            se_root = root / "se"
+            se_folder = se_root / "2026"
+            se_folder.mkdir(parents=True)
+            outage_root = root / "outages"
+            outage_folder = outage_root / "202604"
+            outage_folder.mkdir(parents=True)
+
+            for day, se_time, outage_hour in (
+                ("20260414", "0000", "04"),
+                ("20260418", "1800", "22"),
+                ("20260420", "0000", "04"),
+                ("20260420", "0500", "09"),
+            ):
+                (se_folder / f"miso_se_{day}-{se_time}_AREVA.raw").write_text("raw", encoding="utf-8")
+                (outage_folder / f"2308_Planned_Outages_2026-04-{day[-2:]}-{outage_hour}-50-00.xml").write_text(
+                    "<Outages />",
+                    encoding="utf-8",
+                )
+
+            result = build_case_mappings_for_dates(
+                ["20260414 00", "20260418 018", "20260420 00", "20260420 05"],
+                quarter_model_root=model_root,
+                se_root=se_root,
+                planned_outage_root=outage_root,
+            )
+
+            self.assertEqual(len(result), 4)
+            self.assertEqual([item.se_time.strftime("%Y%m%d-%H%M") for item in result], [
+                "20260414-0000",
+                "20260418-1800",
+                "20260420-0000",
+                "20260420-0500",
+            ])
+
+    def test_build_case_mappings_for_dates_accepts_unquoted_date_hour_pairs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            model_root = root / "models"
+            model_file = model_root / "202603" / "Mar2026_final.raw"
+            model_file.parent.mkdir(parents=True)
+            model_file.write_text("raw", encoding="utf-8")
+
+            se_root = root / "se"
+            se_folder = se_root / "2026"
+            se_folder.mkdir(parents=True)
+            outage_root = root / "outages"
+            outage_folder = outage_root / "202604"
+            outage_folder.mkdir(parents=True)
+
+            (se_folder / "miso_se_20260414-0000_AREVA.raw").write_text("raw", encoding="utf-8")
+            (outage_folder / "2308_Planned_Outages_2026-04-14-04-50-00.xml").write_text("<Outages />", encoding="utf-8")
+
+            result = build_case_mappings_for_dates(
+                ["20260414", "00"],
+                quarter_model_root=model_root,
+                se_root=se_root,
+                planned_outage_root=outage_root,
+            )
+
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0].se_time.strftime("%Y%m%d-%H%M"), "20260414-0000")
 
     def test_read_planned_outage_xml_and_filter_active_oos(self):
         with tempfile.TemporaryDirectory() as temp_dir:
