@@ -26,6 +26,12 @@ Example:
 python MISO_SE_po_EMS_mapper.py --date 20260511
 ```
 
+Multiple dates can be listed in one command:
+
+```bash
+python MISO_SE_po_EMS_mapper.py --date 20260414 20240401
+```
+
 This looks for:
 
 - `G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw`

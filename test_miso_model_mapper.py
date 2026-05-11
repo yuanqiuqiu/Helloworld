@@ -8,6 +8,7 @@ import pandas as pd
 from MISO_SE_po_EMS_mapper import (
     build_mapping,
     build_case_mappings,
+    build_case_mappings_for_dates,
     expected_quarter_model,
     format_path_for_output,
     find_inputs_for_se_raw,
@@ -268,6 +269,41 @@ class MisoModelMapperTests(unittest.TestCase):
             self.assertEqual(len(result), 4)
             self.assertTrue(all(item.quarter_model.path == model_file for item in result))
             self.assertEqual(result[0].planned_outage_file.name, "2308_Planned_Outages_2026-04-07-04-50-00.xml")
+
+    def test_build_case_mappings_for_dates_accepts_multiple_dates(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            model_root = root / "models"
+            model_file = model_root / "202603" / "Mar2026_final.raw"
+            model_file.parent.mkdir(parents=True)
+            model_file.write_text("raw", encoding="utf-8")
+
+            se_root = root / "se"
+            se_folder = se_root / "2026"
+            se_folder.mkdir(parents=True)
+            outage_root = root / "outages"
+            outage_folder = outage_root / "202604"
+            outage_folder.mkdir(parents=True)
+
+            for day in ("20260414", "20260415"):
+                for hour in ("0000", "0600", "1200", "1800"):
+                    (se_folder / f"miso_se_{day}-{hour}_AREVA.raw").write_text("raw", encoding="utf-8")
+                for hour in ("04", "10", "16", "22"):
+                    (outage_folder / f"2308_Planned_Outages_2026-04-{day[-2:]}-{hour}-50-00.xml").write_text(
+                        "<Outages />",
+                        encoding="utf-8",
+                    )
+
+            result = build_case_mappings_for_dates(
+                ["20260414", "20260415"],
+                quarter_model_root=model_root,
+                se_root=se_root,
+                planned_outage_root=outage_root,
+            )
+
+            self.assertEqual(len(result), 8)
+            self.assertEqual(result[0].se_time.strftime("%Y%m%d-%H%M"), "20260414-0000")
+            self.assertEqual(result[-1].se_time.strftime("%Y%m%d-%H%M"), "20260415-1800")
 
     def test_read_planned_outage_xml_and_filter_active_oos(self):
         with tempfile.TemporaryDirectory() as temp_dir:

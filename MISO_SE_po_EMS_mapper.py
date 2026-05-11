@@ -401,6 +401,32 @@ def build_case_mappings(
     )
 
 
+def build_case_mappings_for_dates(
+    study_dates: Sequence[str | date | None],
+    *,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    expected_se_count: int | None = 4,
+    hour_offset: int = 4,
+) -> tuple[SeCaseMapping, ...]:
+    """Find SE, outage XML, and quarter model mappings for multiple dates."""
+
+    mappings: list[SeCaseMapping] = []
+    for study_date in study_dates:
+        mappings.extend(
+            build_case_mappings(
+                study_date,
+                quarter_model_root=quarter_model_root,
+                se_root=se_root,
+                planned_outage_root=planned_outage_root,
+                expected_se_count=expected_se_count,
+                hour_offset=hour_offset,
+            )
+        )
+    return tuple(mappings)
+
+
 def print_case_mappings(case_mappings: tuple[SeCaseMapping, ...]) -> None:
     """Print SE, outage XML, and quarter model mappings."""
 
@@ -415,7 +441,11 @@ def print_case_mappings(case_mappings: tuple[SeCaseMapping, ...]) -> None:
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Map MISO SE raw files to planned outage XMLs and the quarter model.")
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--date", help="Study date as YYYYMMDD or YYYY-MM-DD. Defaults to today when omitted.")
+    source.add_argument(
+        "--date",
+        nargs="*",
+        help="One or more study dates as YYYYMMDD or YYYY-MM-DD. Defaults to today when omitted.",
+    )
     source.add_argument("--se-file", help="One SE raw filename/path.")
     parser.add_argument("--quarter-model-root", default=DEFAULT_QUARTER_MODEL_ROOT, help="Root folder for quarterly EMS models.")
     parser.add_argument("--se-root", default=DEFAULT_SE_ROOT, help="Root folder for MISO SE raw files.")
@@ -431,7 +461,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    date_input = args.se_file or args.date
     try:
         if args.se_file:
             case_mappings = (
@@ -443,8 +472,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             )
         else:
-            case_mappings = build_case_mappings(
-                date_input,
+            date_inputs = args.date or [None]
+            case_mappings = build_case_mappings_for_dates(
+                date_inputs,
                 quarter_model_root=args.quarter_model_root,
                 se_root=args.se_root,
                 planned_outage_root=args.planned_outage_root,
