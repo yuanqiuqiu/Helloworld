@@ -8,12 +8,11 @@ SE folder (``MISO_SE/YYYY``) and the quarterly EMS model folder/name.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 DEFAULT_QUARTER_MODEL_ROOT = r"G:\Power\MISO\Quarterly EMS Models"
@@ -42,18 +41,6 @@ class MisoRawMapping:
     quarter_model: QuarterModel
     se_raw_files: tuple[Path, ...]
 
-    def to_json_dict(self) -> dict[str, object]:
-        return {
-            "date": self.study_date.isoformat(),
-            "quarter_model": {
-                "quarter": f"{self.quarter_model.quarter_name}{self.quarter_model.quarter_year}",
-                "folder": format_path_for_output(self.quarter_model.folder),
-                "file": self.quarter_model.file_name,
-                "path": format_path_for_output(self.quarter_model.path),
-            },
-            "se_raw_files": [format_path_for_output(path) for path in self.se_raw_files],
-        }
-
 
 def format_path_for_output(path: str | Path) -> str:
     """Display Windows-drive paths with backslashes even when run on Linux."""
@@ -62,6 +49,16 @@ def format_path_for_output(path: str | Path) -> str:
     if re.match(r"^[A-Za-z]:\\", value):
         return value.replace("/", "\\")
     return value
+
+
+def parse_se_datetime(value: str | Path) -> datetime:
+    """Parse YYYYMMDD-HHMM from a MISO SE raw filename or path."""
+
+    file_name = re.split(r"[\\/]", str(value).strip())[-1]
+    se_match = SE_RAW_RE.match(file_name)
+    if not se_match:
+        raise ValueError(f"Could not parse SE date/time from {value!r}")
+    return datetime.strptime(f"{se_match.group('date')}-{se_match.group('time')}", "%Y%m%d-%H%M")
 
 
 def parse_study_date(value: str | date | None) -> date:
@@ -73,10 +70,10 @@ def parse_study_date(value: str | date | None) -> date:
         return value
 
     stripped = str(value).strip()
-    file_name = re.split(r"[\\/]", stripped)[-1]
-    se_match = SE_RAW_RE.match(file_name)
-    if se_match:
-        stripped = se_match.group("date")
+    try:
+        return parse_se_datetime(stripped).date()
+    except ValueError:
+        pass
 
     for fmt in ("%Y%m%d", "%Y-%m-%d"):
         try:
@@ -237,10 +234,14 @@ def build_expected_mapping(
     return MisoRawMapping(parsed_date, quarter_model, expected_se_files)
 
 
-def _json_default(value: object) -> str:
-    if isinstance(value, (Path, date)):
-        return str(value)
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+def print_mapping(mapping: MisoRawMapping) -> None:
+    """Print mapping output in a simple text format."""
+
+    print(f"Study date: {mapping.study_date:%Y-%m-%d}")
+    print(f"Quarter model: {format_path_for_output(mapping.quarter_model.path)}")
+    print("SE raw files:")
+    for se_file in mapping.se_raw_files:
+        print(f"  {format_path_for_output(se_file)}")
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -276,7 +277,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}")
         return 1
 
-    print(json.dumps(mapping.to_json_dict(), indent=2, default=_json_default))
+    print_mapping(mapping)
     return 0
 
 
