@@ -208,11 +208,12 @@ class MisoModelMapperTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            records = read_planned_outage_xml(xml_file)
-            active = active_oos_outages(records, parse_se_datetime("miso_se_20260427-0000_AREVA.raw"))
+            outages = read_planned_outage_xml(xml_file)
+            active = active_oos_outages(xml_file, parse_se_datetime("miso_se_20260427-0000_AREVA.raw"))
 
+            self.assertEqual(len(outages), 2)
             self.assertEqual(len(active), 1)
-            self.assertEqual(active[0]["Outage_Request_ID"], "1")
+            self.assertEqual(str(active.iloc[0]["Outage_Request_ID"]), "1")
 
 
 if __name__ == "__main__":

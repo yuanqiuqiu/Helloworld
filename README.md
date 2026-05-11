@@ -52,6 +52,12 @@ SE raw files:
 
 ## Planned outage XML mapping
 
+Install dependencies first:
+
+```bash
+pip install -r requirements.txt
+```
+
 Use `planned_outages.py` to find the planned outage XML snapshot for one SE raw
 file:
 
