@@ -1,25 +1,15 @@
-"""Find planned outage XML snapshots and map outage rows to BranchList."""
+"""Process mapped planned outages into BranchList baseline actions."""
 
 from __future__ import annotations
 
-import argparse
 import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
 import pandas as pd
 
-from MISO_quarter_model_mapper import QuarterModel, find_quarter_model, format_path_for_output, parse_se_datetime
-
-
-DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\Planned Outages"
-
-PLANNED_OUTAGE_RE = re.compile(
-    r"^2308_Planned_Outages_(?P<stamp>\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.xml$",
-    re.IGNORECASE,
-)
+from MISO_quarter_model_mapper import parse_se_datetime
 
 COLUMN_NAMES = {
     "OUTAGE_REQUEST_ID": "Outage_Request_ID",
@@ -40,84 +30,6 @@ COLUMN_NAMES = {
 DATE_COLUMNS = ["Planned_Start", "Planned_End", "Actual_Start", "Actual_End"]
 
 
-@dataclass(frozen=True)
-class PlannedOutageFile:
-    path: Path
-    timestamp: datetime
-
-
-@dataclass(frozen=True)
-class SeRawInputs:
-    se_raw_file: Path
-    quarter_model: QuarterModel
-    planned_outage_file: Path
-
-
-def parse_planned_outage_timestamp(path: str | Path) -> datetime:
-    """Parse timestamp from 2308_Planned_Outages_YYYY-MM-DD-HH-MM-SS.xml."""
-
-    file_name = re.split(r"[\\/]", str(path))[-1]
-    match = PLANNED_OUTAGE_RE.match(file_name)
-    if not match:
-        raise ValueError(f"Not a planned outage filename: {path!r}")
-    return datetime.strptime(match.group("stamp"), "%Y-%m-%d-%H-%M-%S")
-
-
-def planned_outage_hour_for_se_time(se_time: datetime, hour_offset: int = 4) -> int:
-    """Return planned-outage filename hour. Default follows the examples: SE hour + 4."""
-
-    return (se_time + timedelta(hours=hour_offset)).hour
-
-
-def find_planned_outage_file(
-    se_raw_file: str | Path,
-    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
-    *,
-    hour_offset: int = 4,
-    require_active_outage: bool = False,
-) -> Path:
-    """Find the latest planned outage XML with filename hour matching the SE case."""
-
-    se_time = parse_se_datetime(se_raw_file)
-    adjusted_se_time = se_time + timedelta(hours=hour_offset)
-    target_hour = adjusted_se_time.hour
-
-    matches = []
-    for path in Path(planned_outage_root).glob("**/2308_Planned_Outages_*.xml"):
-        if not path.is_file():
-            continue
-        try:
-            outage_time = parse_planned_outage_timestamp(path)
-        except ValueError:
-            continue
-        if outage_time.hour == target_hour and outage_time <= adjusted_se_time:
-            matches.append(PlannedOutageFile(path, outage_time))
-
-    if require_active_outage:
-        matches = [item for item in matches if not active_oos_outages(item.path, se_time).empty]
-
-    if not matches:
-        raise FileNotFoundError(f"No planned outage XML found for {se_raw_file} with filename hour {target_hour:02d}")
-    return max(matches, key=lambda item: item.timestamp).path
-
-
-def find_inputs_for_se_raw(
-    se_raw_file: str | Path,
-    quarter_model_root: str | Path,
-    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
-    *,
-    hour_offset: int = 4,
-) -> SeRawInputs:
-    """Find quarter model and planned outage XML for one SE raw file."""
-
-    se_time = parse_se_datetime(se_raw_file)
-    return SeRawInputs(
-        se_raw_file=Path(se_raw_file),
-        quarter_model=find_quarter_model(se_time.date(), quarter_model_root),
-        planned_outage_file=find_planned_outage_file(se_raw_file, planned_outage_root, hour_offset=hour_offset),
-    )
-
-
 def read_planned_outage_xml(xml_file: str | Path) -> pd.DataFrame:
     """Read planned outage XML with pandas and normalize common column names."""
 
@@ -126,8 +38,8 @@ def read_planned_outage_xml(xml_file: str | Path) -> pd.DataFrame:
     return outages
 
 
-def active_oos_outages(xml_file: str | Path, se_time: datetime) -> pd.DataFrame:
-    """Read XML and return active OOS outage rows for the SE case time."""
+def active_planned_outages(xml_file: str | Path, se_time: datetime) -> pd.DataFrame:
+    """Read XML and return active OOS/InSvrNo outage rows for the SE case time."""
 
     outages = read_planned_outage_xml(xml_file)
     if outages.empty:
@@ -140,11 +52,22 @@ def active_oos_outages(xml_file: str | Path, se_time: datetime) -> pd.DataFrame:
 
     if "Equipment_Request_Type" not in outages.columns:
         return outages.iloc[0:0].copy()
-    outages = outages[outages["Equipment_Request_Type"].astype(str).str.strip().str.upper() == "OOS"].copy()
+    outage_type = outages["Equipment_Request_Type"].astype(str).str.strip().str.upper()
+    outages = outages[outage_type.isin(["OOS", "INSVRNO"])].copy()
     outages["start_time"] = outages["Actual_Start"].fillna(outages["Planned_Start"])
     outages["end_time"] = outages["Actual_End"].fillna(outages["Planned_End"])
 
     return outages[(outages["start_time"] <= se_time) & (outages["end_time"] >= se_time)].copy()
+
+
+def active_oos_outages(xml_file: str | Path, se_time: datetime) -> pd.DataFrame:
+    """Read XML and return active OOS rows for the SE case time."""
+
+    active = active_planned_outages(xml_file, se_time)
+    if "Equipment_Request_Type" not in active.columns:
+        return active.iloc[0:0].copy()
+    outage_type = active["Equipment_Request_Type"].astype(str).str.strip().str.upper()
+    return active[outage_type == "OOS"].copy()
 
 
 def add_ems_name(outages: pd.DataFrame) -> pd.DataFrame:
@@ -261,14 +184,64 @@ def map_outage_file_to_branch_lists(
     quarter_branch_list: pd.DataFrame,
     se_branch_list: pd.DataFrame,
 ) -> dict[str, pd.DataFrame]:
-    """Read one XML outage file and map active OOS outages to both BranchLists."""
+    """Read one XML outage file and map active planned outages to both BranchLists."""
 
-    active = active_oos_outages(xml_file, parse_se_datetime(se_raw_file))
+    active = active_planned_outages(xml_file, parse_se_datetime(se_raw_file))
+    future_retired = find_future_equipment_retired_lines(active, quarter_branch_list)
+    quarter = mapping_branch(active, quarter_branch_list)
     return {
-        "quarter": mapping_branch(active, quarter_branch_list),
+        "active": active,
+        "quarter": quarter,
         "se": mapping_branch(active, se_branch_list),
-        "future_retired": find_future_equipment_retired_lines(active, quarter_branch_list),
+        "future_retired": future_retired,
+        "baseline_actions": baseline_branch_actions(quarter, future_retired),
     }
+
+
+def baseline_branch_actions(mapped_outages: pd.DataFrame, future_retired: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Create branch status changes that remove planned outages from one SE case.
+
+    Rules:
+    - OOS means the planned outage opened the device, so baseline action is Closed.
+    - InSvrNo means the planned outage closed a normally-open device, so baseline action is Open.
+    - Future Equipment stays Open in the baseline.
+    - Previous A-B equipment retired by Future Equipment is added back as Closed.
+    """
+
+    action_cols = ["FromBusNum", "ToBusNum", "Circuit", "TargetStatus", "Reason"]
+    if mapped_outages.empty:
+        actions = pd.DataFrame(columns=action_cols)
+    else:
+        actions = mapped_outages.copy()
+        outage_type = actions["Equipment_Request_Type"].astype(str).str.strip().str.upper()
+        priority = actions.get("Priority", pd.Series("", index=actions.index)).astype(str).str.strip().str.upper()
+        actions["TargetStatus"] = "Closed"
+        actions.loc[outage_type == "INSVRNO", "TargetStatus"] = "Open"
+        actions.loc[priority == "FUTURE EQUIPMENT", "TargetStatus"] = "Open"
+        actions["Reason"] = actions["Equipment_Request_Type"].astype(str)
+        actions.loc[priority == "FUTURE EQUIPMENT", "Reason"] = "Future Equipment stays out of service"
+        actions = actions[action_cols].copy()
+
+    if future_retired is not None and not future_retired.empty:
+        restored = future_retired[["FromBusNum", "ToBusNum", "Circuit"]].copy()
+        restored["TargetStatus"] = "Closed"
+        restored["Reason"] = "Previous device for Future Equipment"
+        actions = pd.concat([actions, restored[action_cols]], ignore_index=True)
+
+    return actions.drop_duplicates(subset=["FromBusNum", "ToBusNum", "Circuit", "TargetStatus"])
+
+
+def process_mapped_outages_for_se_case(
+    xml_file: str | Path,
+    se_raw_file: str | Path,
+    quarter_branch_list: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return baseline branch actions for one SE timestamp using the quarter BranchList."""
+
+    active = active_planned_outages(xml_file, parse_se_datetime(se_raw_file))
+    mapped = mapping_branch(active, quarter_branch_list)
+    future_retired = find_future_equipment_retired_lines(active, quarter_branch_list)
+    return baseline_branch_actions(mapped, future_retired)
 
 
 def find_future_equipment_retired_lines(active: pd.DataFrame, quarter_branch_list: pd.DataFrame) -> pd.DataFrame:
@@ -334,36 +307,3 @@ def reverse_branch_list(branch_list: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def print_planned_outage_match(se_raw_file: str | Path, outage_file: str | Path) -> None:
-    print(f"SE raw file: {format_path_for_output(se_raw_file)}")
-    print(f"Planned outage XML: {format_path_for_output(outage_file)}")
-
-
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Find the planned outage XML for one MISO SE raw file.")
-    parser.add_argument("--se-file", required=True)
-    parser.add_argument("--planned-outage-root", default=DEFAULT_PLANNED_OUTAGE_ROOT)
-    parser.add_argument("--hour-offset", type=int, default=4)
-    parser.add_argument("--require-active-outage", action="store_true")
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
-    try:
-        outage_file = find_planned_outage_file(
-            args.se_file,
-            args.planned_outage_root,
-            hour_offset=args.hour_offset,
-            require_active_outage=args.require_active_outage,
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"error: {exc}")
-        return 1
-
-    print_planned_outage_match(args.se_file, outage_file)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -1,7 +1,7 @@
 # MISO model mapper
 
-Utility for mapping a MISO SE raw file date to the quarterly EMS model and the
-four same-day SE raw files.
+Utility for mapping MISO SE raw files to the quarterly EMS model and planned
+outage XML files.
 
 Default roots:
 
@@ -27,24 +27,24 @@ This looks for:
 - `G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw`
 - four SE files matching
   `G:\Power\MISO\MISO_SE\2026\miso_se_20260511-HHMM_AREVA.raw`
+- planned outage XML files with filename hour = SE hour + 4
 
 Use a SE raw filename directly:
 
 ```bash
-python MISO_quarter_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw
+python MISO_quarter_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw --planned-outage-root "G:\Power\MISO\Planned Outages"
 ```
 
 The command prints plain text, for example:
 
 ```text
-Study date: 2026-05-11
+SE raw file: G:\Power\MISO\MISO_SE\2026\miso_se_20260511-0000_AREVA.raw
+SE time: 2026-05-11 00:00
 Quarter model: G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw
-SE raw files:
-  G:\Power\MISO\MISO_SE\2026\miso_se_20260511-0000_AREVA.raw
-  ...
+Planned outage XML: G:\Power\MISO\Planned Outages\...\2308_Planned_Outages_2026-...
 ```
 
-## Planned outage XML mapping
+## Planned outage processing
 
 Install dependencies first:
 
@@ -52,12 +52,11 @@ Install dependencies first:
 pip install -r requirements.txt
 ```
 
-Use `MISO_planned_outage_process.py` to find the planned outage XML snapshot for one SE raw
-file:
+`MISO_quarter_model_mapper.py` is the file lookup script. It maps each SE raw
+file to:
 
-```bash
-python MISO_planned_outage_process.py --se-file miso_se_20260427-0000_AREVA.raw --planned-outage-root "G:\Power\MISO\Planned Outages"
-```
+- the quarterly model
+- the planned outage XML
 
 Planned outage files are expected to look like:
 
@@ -75,7 +74,7 @@ If another dataset needs SE hour + 5 instead, pass `--hour-offset 5`.
 For one SE raw file, find both required input files:
 
 ```python
-from MISO_planned_outage_process import find_inputs_for_se_raw
+from MISO_quarter_model_mapper import find_inputs_for_se_raw
 
 inputs = find_inputs_for_se_raw(
     se_raw_file,
@@ -85,7 +84,7 @@ inputs = find_inputs_for_se_raw(
 ```
 
 After PowerWorld reads `inputs.quarter_model.path` and the SE raw file into
-BranchLists, map the active planned outages to both cases:
+BranchLists, process the active planned outages:
 
 ```python
 from MISO_planned_outage_process import map_outage_file_to_branch_lists
@@ -100,6 +99,10 @@ mapped = map_outage_file_to_branch_lists(
 
 `mapped["quarter"]` contains planned outages mapped to the quarterly model
 BranchList. `mapped["se"]` contains the same outage rows mapped to the SE model
-BranchList. `mapped["future_retired"]` contains original A-B branch candidates
-that should stay open when Future Equipment A-C and C-B is already in service in
-the SE case.
+BranchList. `mapped["baseline_actions"]` contains branch status changes to build
+the baseline topology:
+
+- active `OOS` planned outage -> `Closed`
+- active `InSvrNo` planned outage -> `Open`
+- `Future Equipment` -> keep future equipment `Open`
+- previous A-B device replaced by future A-C/C-B equipment -> `Closed`

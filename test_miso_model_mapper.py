@@ -3,22 +3,27 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
+
 from MISO_quarter_model_mapper import (
     build_mapping,
+    build_case_mappings,
     expected_quarter_model,
     format_path_for_output,
+    find_inputs_for_se_raw,
+    find_planned_outage_file,
     find_quarter_model,
     find_se_raw_files,
+    parse_planned_outage_timestamp,
     parse_se_datetime,
     parse_study_date,
+    planned_outage_hour_for_se_time,
     quarter_for_date,
 )
 from MISO_planned_outage_process import (
     active_oos_outages,
-    find_inputs_for_se_raw,
-    find_planned_outage_file,
-    parse_planned_outage_timestamp,
-    planned_outage_hour_for_se_time,
+    active_planned_outages,
+    baseline_branch_actions,
     read_planned_outage_xml,
 )
 
@@ -170,6 +175,39 @@ class MisoModelMapperTests(unittest.TestCase):
             self.assertEqual(result.quarter_model.path, model_file)
             self.assertEqual(result.planned_outage_file, outage_file)
 
+    def test_build_case_mappings_returns_se_outage_and_quarter_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            model_root = root / "models"
+            model_file = model_root / "202603" / "Mar2026_final.raw"
+            model_file.parent.mkdir(parents=True)
+            model_file.write_text("raw", encoding="utf-8")
+
+            se_root = root / "se"
+            se_folder = se_root / "2026"
+            se_folder.mkdir(parents=True)
+            for hour in ("0000", "0600", "1200", "1800"):
+                (se_folder / f"miso_se_20260427-{hour}_AREVA.raw").write_text("raw", encoding="utf-8")
+
+            outage_root = root / "outages"
+            outage_root.mkdir()
+            for hour in ("0400", "1000", "1600", "2200"):
+                (outage_root / f"2308_Planned_Outages_2026-04-07-{hour[:2]}-50-00.xml").write_text(
+                    "<Outages />",
+                    encoding="utf-8",
+                )
+
+            result = build_case_mappings(
+                "20260427",
+                quarter_model_root=model_root,
+                se_root=se_root,
+                planned_outage_root=outage_root,
+            )
+
+            self.assertEqual(len(result), 4)
+            self.assertTrue(all(item.quarter_model.path == model_file for item in result))
+            self.assertEqual(result[0].planned_outage_file.name, "2308_Planned_Outages_2026-04-07-04-50-00.xml")
+
     def test_read_planned_outage_xml_and_filter_active_oos(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             xml_file = Path(temp_dir) / "2308_Planned_Outages_2026-04-07-04-50-00.xml"
@@ -187,9 +225,9 @@ class MisoModelMapperTests(unittest.TestCase):
   </Outage>
   <Outage>
     <Outage_Request_ID>2</Outage_Request_ID>
-    <Equipment_Request_Type>OOS</Equipment_Request_Type>
-    <Planned_Start>2026-04-28 00:00:00</Planned_Start>
-    <Planned_End>2026-04-28 01:00:00</Planned_End>
+    <Equipment_Request_Type>InSvrNo</Equipment_Request_Type>
+    <Planned_Start>2026-04-26 22:00:00</Planned_Start>
+    <Planned_End>2026-04-27 01:00:00</Planned_End>
   </Outage>
 </Outages>
 """,
@@ -198,10 +236,52 @@ class MisoModelMapperTests(unittest.TestCase):
 
             outages = read_planned_outage_xml(xml_file)
             active = active_oos_outages(xml_file, parse_se_datetime("miso_se_20260427-0000_AREVA.raw"))
+            active_planned = active_planned_outages(xml_file, parse_se_datetime("miso_se_20260427-0000_AREVA.raw"))
 
             self.assertEqual(len(outages), 2)
             self.assertEqual(len(active), 1)
+            self.assertEqual(len(active_planned), 2)
             self.assertEqual(str(active.iloc[0]["Outage_Request_ID"]), "1")
+
+    def test_baseline_branch_actions_follow_outage_type_and_future_equipment_rules(self):
+        mapped = pd.DataFrame(
+            [
+                {
+                    "FromBusNum": 1,
+                    "ToBusNum": 2,
+                    "Circuit": "1",
+                    "Equipment_Request_Type": "OOS",
+                    "Priority": "",
+                },
+                {
+                    "FromBusNum": 3,
+                    "ToBusNum": 4,
+                    "Circuit": "1",
+                    "Equipment_Request_Type": "InSvrNo",
+                    "Priority": "",
+                },
+                {
+                    "FromBusNum": 5,
+                    "ToBusNum": 6,
+                    "Circuit": "1",
+                    "Equipment_Request_Type": "OOS",
+                    "Priority": "Future Equipment",
+                },
+            ]
+        )
+        future_retired = pd.DataFrame([{"FromBusNum": 7, "ToBusNum": 8, "Circuit": "1"}])
+
+        actions = baseline_branch_actions(mapped, future_retired)
+
+        self.assertEqual(
+            actions[["FromBusNum", "ToBusNum", "TargetStatus"]].values.tolist(),
+            [
+                [1, 2, "Closed"],
+                [3, 4, "Open"],
+                [5, 6, "Open"],
+                [7, 8, "Closed"],
+            ],
+        )
 
 
 if __name__ == "__main__":
