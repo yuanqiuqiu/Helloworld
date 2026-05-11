@@ -19,7 +19,7 @@ Quarter selection:
 Example:
 
 ```bash
-python miso_model_mapper.py --date 20260511
+python MISO_quarter_model_mapper.py --date 20260511
 ```
 
 This looks for:
@@ -31,7 +31,7 @@ This looks for:
 Use a SE raw filename directly:
 
 ```bash
-python miso_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw
+python MISO_quarter_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw
 ```
 
 The command prints plain text, for example:
@@ -52,11 +52,11 @@ Install dependencies first:
 pip install -r requirements.txt
 ```
 
-Use `planned_outages.py` to find the planned outage XML snapshot for one SE raw
+Use `MISO_planned_outage_process.py` to find the planned outage XML snapshot for one SE raw
 file:
 
 ```bash
-python planned_outages.py --se-file miso_se_20260427-0000_AREVA.raw --planned-outage-root "G:\Power\MISO\Planned Outages"
+python MISO_planned_outage_process.py --se-file miso_se_20260427-0000_AREVA.raw --planned-outage-root "G:\Power\MISO\Planned Outages"
 ```
 
 Planned outage files are expected to look like:
@@ -75,7 +75,7 @@ If another dataset needs SE hour + 5 instead, pass `--hour-offset 5`.
 For one SE raw file, find both required input files:
 
 ```python
-from planned_outages import find_inputs_for_se_raw
+from MISO_planned_outage_process import find_inputs_for_se_raw
 
 inputs = find_inputs_for_se_raw(
     se_raw_file,
@@ -88,7 +88,7 @@ After PowerWorld reads `inputs.quarter_model.path` and the SE raw file into
 BranchLists, map the active planned outages to both cases:
 
 ```python
-from planned_outages import map_outage_file_to_branch_lists
+from MISO_planned_outage_process import map_outage_file_to_branch_lists
 
 mapped = map_outage_file_to_branch_lists(
     inputs.planned_outage_file,

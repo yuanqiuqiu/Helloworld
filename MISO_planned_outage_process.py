@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from miso_model_mapper import QuarterModel, find_quarter_model, format_path_for_output, parse_se_datetime
+from MISO_quarter_model_mapper import QuarterModel, find_quarter_model, format_path_for_output, parse_se_datetime
 
 
 DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\Planned Outages"

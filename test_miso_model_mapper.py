@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from miso_model_mapper import (
+from MISO_quarter_model_mapper import (
     build_mapping,
     expected_quarter_model,
     format_path_for_output,
@@ -13,7 +13,7 @@ from miso_model_mapper import (
     parse_study_date,
     quarter_for_date,
 )
-from planned_outages import (
+from MISO_planned_outage_process import (
     active_oos_outages,
     find_inputs_for_se_raw,
     find_planned_outage_file,
