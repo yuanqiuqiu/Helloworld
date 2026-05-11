@@ -47,12 +47,21 @@ class MisoRawMapping:
             "date": self.study_date.isoformat(),
             "quarter_model": {
                 "quarter": f"{self.quarter_model.quarter_name}{self.quarter_model.quarter_year}",
-                "folder": str(self.quarter_model.folder),
+                "folder": format_path_for_output(self.quarter_model.folder),
                 "file": self.quarter_model.file_name,
-                "path": str(self.quarter_model.path),
+                "path": format_path_for_output(self.quarter_model.path),
             },
-            "se_raw_files": [str(path) for path in self.se_raw_files],
+            "se_raw_files": [format_path_for_output(path) for path in self.se_raw_files],
         }
+
+
+def format_path_for_output(path: str | Path) -> str:
+    """Display Windows-drive paths with backslashes even when run on Linux."""
+
+    value = str(path)
+    if re.match(r"^[A-Za-z]:\\", value):
+        return value.replace("/", "\\")
+    return value
 
 
 def parse_study_date(value: str | date | None) -> date:
@@ -64,7 +73,8 @@ def parse_study_date(value: str | date | None) -> date:
         return value
 
     stripped = str(value).strip()
-    se_match = SE_RAW_RE.match(Path(stripped).name)
+    file_name = re.split(r"[\\/]", stripped)[-1]
+    se_match = SE_RAW_RE.match(file_name)
     if se_match:
         stripped = se_match.group("date")
 

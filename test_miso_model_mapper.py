@@ -122,6 +122,24 @@ class MisoModelMapperTests(unittest.TestCase):
             "miso_se_20260511-1800_AREVA.raw",
         ])
 
+    def test_json_output_formats_windows_roots_with_backslashes(self):
+        mapping = build_expected_mapping(
+            "20260511",
+            quarter_model_root=r"G:\Power\MISO\Quarterly EMS Models",
+            se_root=r"G:\Power\MISO\MISO_SE",
+        )
+
+        json_mapping = mapping.to_json_dict()
+
+        self.assertEqual(
+            json_mapping["quarter_model"]["path"],
+            r"G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw",
+        )
+        self.assertEqual(
+            json_mapping["se_raw_files"][0],
+            r"G:\Power\MISO\MISO_SE\2026\miso_se_20260511-0000_AREVA.raw",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
