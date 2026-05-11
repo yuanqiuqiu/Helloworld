@@ -203,35 +203,14 @@ def build_mapping(
     *,
     quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
     se_root: str | Path = DEFAULT_SE_ROOT,
-    require_existing_model: bool = True,
     expected_se_count: int | None = 4,
 ) -> MisoRawMapping:
     """Build the SE raw-to-quarter-model mapping for a study date."""
 
     parsed_date = parse_study_date(study_date)
-    quarter_model = (
-        find_quarter_model(parsed_date, quarter_model_root)
-        if require_existing_model
-        else expected_quarter_model(parsed_date, quarter_model_root)
-    )
+    quarter_model = find_quarter_model(parsed_date, quarter_model_root)
     se_raw_files = find_se_raw_files(parsed_date, se_root, expected_count=expected_se_count)
     return MisoRawMapping(parsed_date, quarter_model, se_raw_files)
-
-
-def build_expected_mapping(
-    study_date: str | date | None = None,
-    *,
-    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
-    se_root: str | Path = DEFAULT_SE_ROOT,
-) -> MisoRawMapping:
-    """Build expected paths without requiring files to exist."""
-
-    parsed_date = parse_study_date(study_date)
-    quarter_model = expected_quarter_model(parsed_date, quarter_model_root)
-    folder = se_year_folder(parsed_date, se_root)
-    yyyymmdd = parsed_date.strftime("%Y%m%d")
-    expected_se_files = tuple(folder / f"miso_se_{yyyymmdd}-{hour:02d}00_AREVA.raw" for hour in (0, 6, 12, 18))
-    return MisoRawMapping(parsed_date, quarter_model, expected_se_files)
 
 
 def print_mapping(mapping: MisoRawMapping) -> None:
@@ -252,11 +231,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--quarter-model-root", default=DEFAULT_QUARTER_MODEL_ROOT, help="Root folder for quarterly EMS models.")
     parser.add_argument("--se-root", default=DEFAULT_SE_ROOT, help="Root folder for MISO SE raw files.")
     parser.add_argument("--expected-se-count", type=int, default=4, help="Required number of same-day SE raw files.")
-    parser.add_argument(
-        "--expected-only",
-        action="store_true",
-        help="Print the expected model and four standard 0000/0600/1200/1800 SE paths without checking the filesystem.",
-    )
     return parser.parse_args(argv)
 
 
@@ -264,15 +238,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     date_input = args.se_file or args.date
     try:
-        if args.expected_only:
-            mapping = build_expected_mapping(date_input, quarter_model_root=args.quarter_model_root, se_root=args.se_root)
-        else:
-            mapping = build_mapping(
-                date_input,
-                quarter_model_root=args.quarter_model_root,
-                se_root=args.se_root,
-                expected_se_count=args.expected_se_count,
-            )
+        mapping = build_mapping(
+            date_input,
+            quarter_model_root=args.quarter_model_root,
+            se_root=args.se_root,
+            expected_se_count=args.expected_se_count,
+        )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}")
         return 1

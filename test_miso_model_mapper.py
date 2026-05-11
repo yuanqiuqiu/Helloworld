@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 
 from miso_model_mapper import (
-    build_expected_mapping,
     build_mapping,
     expected_quarter_model,
     format_path_for_output,
@@ -126,17 +125,6 @@ class MisoModelMapperTests(unittest.TestCase):
             self.assertEqual(mapping.study_date, date(2026, 4, 27))
             self.assertEqual(mapping.quarter_model.path, model_file)
             self.assertEqual(len(mapping.se_raw_files), 4)
-
-    def test_build_expected_mapping_does_not_require_existing_files(self):
-        mapping = build_expected_mapping("20260511", quarter_model_root="/models", se_root="/se")
-
-        self.assertEqual(mapping.quarter_model.path, Path("/models/202603/Mar2026_final.raw"))
-        self.assertEqual([path.name for path in mapping.se_raw_files], [
-            "miso_se_20260511-0000_AREVA.raw",
-            "miso_se_20260511-0600_AREVA.raw",
-            "miso_se_20260511-1200_AREVA.raw",
-            "miso_se_20260511-1800_AREVA.raw",
-        ])
 
     def test_format_path_for_output_formats_windows_roots_with_backslashes(self):
         self.assertEqual(

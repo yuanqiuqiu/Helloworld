@@ -34,12 +34,6 @@ Use a SE raw filename directly:
 python miso_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw
 ```
 
-To print expected paths without checking the filesystem:
-
-```bash
-python miso_model_mapper.py --date 20260511 --expected-only
-```
-
 The command prints plain text, for example:
 
 ```text
