@@ -1,0 +1,627 @@
+"""Map MISO SE raw files to the appropriate quarterly EMS model.
+
+The date is normally taken from a SE raw filename such as
+``miso_se_20260427-1800_AREVA.raw``.  The YYYYMMDD portion determines both the
+SE folder (``MISO_SE/YYYY``) and the quarterly EMS model folder/name.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Sequence
+
+
+DEFAULT_QUARTER_MODEL_ROOT = r"G:\Power\MISO\Quarterly EMS Models"
+DEFAULT_SE_ROOT = r"G:\Power\MISO\MISO_SE"
+DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\MISO_planned_outage"
+SE_RAW_RE = re.compile(r"^miso_se_(?P<date>\d{8})-(?P<time>\d{4})_AREVA\.raw$", re.IGNORECASE)
+PLANNED_OUTAGE_RE = re.compile(
+    r"^\d+_Planned_Outages_(?P<stamp>\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.xml$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class QuarterModel:
+    """Quarterly EMS model selected for a study date."""
+
+    study_date: date
+    quarter_year: int
+    quarter_month: int
+    quarter_name: str
+    folder: Path
+    file_name: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class MisoRawMapping:
+    """The four SE raw files for a date and their matching quarter model."""
+
+    study_date: date
+    quarter_model: QuarterModel
+    se_raw_files: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class PlannedOutageFile:
+    """Planned outage XML file selected for a SE case."""
+
+    path: Path
+    timestamp: datetime
+
+
+@dataclass(frozen=True)
+class SeCaseMapping:
+    """One SE raw file with its quarterly model and planned outage XML."""
+
+    se_raw_file: Path
+    se_time: datetime
+    quarter_model: QuarterModel
+    planned_outage_file: Path
+
+
+def format_path_for_output(path: str | Path) -> str:
+    """Display Windows-drive paths with backslashes even when run on Linux."""
+
+    value = str(path)
+    if re.match(r"^[A-Za-z]:\\", value):
+        return value.replace("/", "\\")
+    return value
+
+
+def parse_se_datetime(value: str | Path) -> datetime:
+    """Parse YYYYMMDD-HHMM from a MISO SE raw filename or path."""
+
+    file_name = re.split(r"[\\/]", str(value).strip())[-1]
+    se_match = SE_RAW_RE.match(file_name)
+    if not se_match:
+        raise ValueError(f"Could not parse SE date/time from {value!r}")
+    return datetime.strptime(f"{se_match.group('date')}-{se_match.group('time')}", "%Y%m%d-%H%M")
+
+
+def parse_planned_outage_timestamp(path: str | Path) -> datetime:
+    """Parse timestamp from ####_Planned_Outages_YYYY-MM-DD-HH-MM-SS.xml."""
+
+    file_name = re.split(r"[\\/]", str(path))[-1]
+    match = PLANNED_OUTAGE_RE.match(file_name)
+    if not match:
+        raise ValueError(f"Not a planned outage filename: {path!r}")
+    return datetime.strptime(match.group("stamp"), "%Y-%m-%d-%H-%M-%S")
+
+
+def planned_outage_hour_for_se_time(se_time: datetime, hour_offset: int = 4) -> int:
+    """Return planned-outage filename hour. Default follows the examples: SE hour + 4."""
+
+    return (se_time + timedelta(hours=hour_offset)).hour
+
+
+def planned_outage_folder_for_date(
+    study_date: date | datetime,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+) -> Path:
+    """Return the planned outage folder for a date: planned_outage_root/YYYYMM."""
+
+    yyyymm = f"{study_date.year}{study_date.month:02d}"
+    root_text = str(planned_outage_root)
+    if "YYYYMM" in root_text:
+        return Path(root_text.replace("YYYYMM", yyyymm))
+
+    last_part = re.split(r"[\\/]", root_text.rstrip("\\/"))[-1]
+    if last_part == yyyymm:
+        return Path(root_text)
+    return Path(planned_outage_root) / yyyymm
+
+
+def normalize_se_time(hour_text: str) -> str:
+    """Normalize hour input like 0, 00, 05, 18, 018, or 1800 to HHMM."""
+
+    digits = re.sub(r"\D", "", str(hour_text).strip())
+    if not digits:
+        raise ValueError(f"Could not parse SE hour from {hour_text!r}")
+
+    if len(digits) <= 2:
+        hour = int(digits)
+        minute = 0
+    elif len(digits) == 3 and digits.startswith("0"):
+        hour = int(digits[1:])
+        minute = 0
+    elif len(digits) == 4:
+        hour = int(digits[:2])
+        minute = int(digits[2:])
+    else:
+        raise ValueError(f"Could not parse SE hour from {hour_text!r}")
+
+    if hour > 23 or minute > 59:
+        raise ValueError(f"Invalid SE time {hour_text!r}")
+    return f"{hour:02d}{minute:02d}"
+
+
+def parse_date_request(value: str | date | None) -> tuple[date, str | None]:
+    """Parse a date request, optionally with one SE hour."""
+
+    if value is None or isinstance(value, date):
+        return parse_study_date(value), None
+
+    parts = str(value).strip().split()
+    if len(parts) == 1:
+        return parse_study_date(parts[0]), None
+    if len(parts) == 2:
+        return parse_study_date(parts[0]), normalize_se_time(parts[1])
+    raise ValueError(f"Could not parse date request {value!r}; use YYYYMMDD or 'YYYYMMDD HH'")
+
+
+def _looks_like_date_token(value: object) -> bool:
+    text = str(value).strip()
+    return bool(re.fullmatch(r"\d{8}|\d{4}-\d{2}-\d{2}", text))
+
+
+def _looks_like_hour_token(value: object) -> bool:
+    text = str(value).strip()
+    return bool(re.fullmatch(r"\d{1,4}", text)) and not _looks_like_date_token(text)
+
+
+def combine_unquoted_date_hours(values: Sequence[str | date | None]) -> tuple[str | date | None, ...]:
+    """Support both '--date "20260414 00"' and '--date 20260414 00'."""
+
+    combined: list[str | date | None] = []
+    i = 0
+    while i < len(values):
+        current = values[i]
+        if (
+            isinstance(current, str)
+            and _looks_like_date_token(current)
+            and i + 1 < len(values)
+            and _looks_like_hour_token(values[i + 1])
+        ):
+            combined.append(f"{current} {values[i + 1]}")
+            i += 2
+        else:
+            combined.append(current)
+            i += 1
+    return tuple(combined)
+
+
+def parse_study_date(value: str | date | None) -> date:
+    """Parse a study date from YYYYMMDD, YYYY-MM-DD, or a SE raw filename."""
+
+    if value is None:
+        return date.today()
+    if isinstance(value, date):
+        return value
+
+    stripped = str(value).strip()
+    try:
+        return parse_se_datetime(stripped).date()
+    except ValueError:
+        pass
+
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(stripped, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError(f"Could not parse study date from {value!r}; expected YYYYMMDD, YYYY-MM-DD, or SE raw filename")
+
+
+def quarter_for_date(study_date: date) -> tuple[int, int, str]:
+    """Return the quarter model year, month, and month abbreviation for a date."""
+
+    month = study_date.month
+    if month in (1, 2):
+        return study_date.year - 1, 12, "Dec"
+    if month in (3, 4, 5):
+        return study_date.year, 3, "Mar"
+    if month in (6, 7, 8):
+        return study_date.year, 6, "Jun"
+    if month in (9, 10, 11):
+        return study_date.year, 9, "Sep"
+    return study_date.year, 12, "Dec"
+
+
+def expected_quarter_model(study_date: date, quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT) -> QuarterModel:
+    """Build the expected quarter model path for a study date."""
+
+    quarter_year, quarter_month, quarter_name = quarter_for_date(study_date)
+    folder = Path(quarter_model_root) / f"{quarter_year}{quarter_month:02d}"
+    file_name = f"{quarter_name}{quarter_year}_final.raw"
+    return QuarterModel(
+        study_date=study_date,
+        quarter_year=quarter_year,
+        quarter_month=quarter_month,
+        quarter_name=quarter_name,
+        folder=folder,
+        file_name=file_name,
+        path=folder / file_name,
+    )
+
+
+def find_quarter_model(study_date: date, quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT) -> QuarterModel:
+    """Find the quarter model file, requiring a final.raw file to exist."""
+
+    model = expected_quarter_model(study_date, quarter_model_root)
+    if model.path.is_file():
+        return model
+
+    candidates: list[Path] = []
+    if model.folder.is_dir():
+        prefix = f"{model.quarter_name}{model.quarter_year}".lower()
+        candidates = sorted(
+            path
+            for path in model.folder.iterdir()
+            if path.is_file() and path.name.lower().startswith(prefix) and path.name.lower().endswith("final.raw")
+        )
+    if len(candidates) == 1:
+        candidate = candidates[0]
+        return QuarterModel(
+            study_date=model.study_date,
+            quarter_year=model.quarter_year,
+            quarter_month=model.quarter_month,
+            quarter_name=model.quarter_name,
+            folder=model.folder,
+            file_name=candidate.name,
+            path=candidate,
+        )
+
+    if candidates:
+        raise FileNotFoundError(
+            f"Expected one {model.quarter_name}{model.quarter_year}*final.raw file in {model.folder}, "
+            f"found {len(candidates)}: {', '.join(path.name for path in candidates)}"
+        )
+    raise FileNotFoundError(f"Quarter model not found: {model.path}")
+
+
+def se_year_folder(study_date: date, se_root: str | Path = DEFAULT_SE_ROOT) -> Path:
+    """Return the SE folder for the study date year."""
+
+    return Path(se_root) / f"{study_date.year}"
+
+
+def _se_raw_sort_key(path: Path) -> tuple[str, str]:
+    match = SE_RAW_RE.match(path.name)
+    if not match:
+        return ("9999", path.name)
+    return (match.group("time"), path.name)
+
+
+def find_se_raw_files(
+    study_date: date,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    *,
+    expected_count: int | None = 4,
+) -> tuple[Path, ...]:
+    """Find same-day MISO SE raw files under MISO_SE/YYYY.
+
+    Files are matched by ``miso_se_YYYYMMDD-HHMM_AREVA.raw`` and returned in
+    HHMM order.  By default this requires exactly four files for the date.
+    """
+
+    folder = se_year_folder(study_date, se_root)
+    if not folder.is_dir():
+        raise FileNotFoundError(f"SE folder not found: {folder}")
+
+    yyyymmdd = study_date.strftime("%Y%m%d")
+    files = tuple(
+        sorted(
+            (
+                path
+                for path in folder.iterdir()
+                if path.is_file()
+                and (match := SE_RAW_RE.match(path.name))
+                and match.group("date") == yyyymmdd
+            ),
+            key=_se_raw_sort_key,
+        )
+    )
+
+    if expected_count is not None and len(files) != expected_count:
+        raise FileNotFoundError(f"Expected {expected_count} SE raw files for {yyyymmdd} in {folder}, found {len(files)}")
+    return files
+
+
+def find_se_raw_file(study_date: date, se_time: str, se_root: str | Path = DEFAULT_SE_ROOT) -> Path:
+    """Find one MISO SE raw file for a date and HHMM time."""
+
+    folder = se_year_folder(study_date, se_root)
+    if not folder.is_dir():
+        raise FileNotFoundError(f"SE folder not found: {folder}")
+
+    file_name = f"miso_se_{study_date:%Y%m%d}-{se_time}_AREVA.raw"
+    path = folder / file_name
+    if not path.is_file():
+        raise FileNotFoundError(f"SE raw file not found: {path}")
+    return path
+
+
+def list_planned_outage_files(planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT) -> tuple[PlannedOutageFile, ...]:
+    """Read planned outage XML filenames from one folder."""
+
+    files = []
+    for path in Path(planned_outage_root).glob("*_Planned_Outages_*.xml"):
+        if not path.is_file():
+            continue
+        try:
+            files.append(PlannedOutageFile(path, parse_planned_outage_timestamp(path)))
+        except ValueError:
+            continue
+    return tuple(files)
+
+
+def select_planned_outage_file(
+    se_raw_file: str | Path,
+    planned_outage_files: Sequence[PlannedOutageFile],
+    *,
+    hour_offset: int = 4,
+    searched_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+) -> Path:
+    """Find the closest planned outage XML at or before the target filename hour."""
+
+    se_time = parse_se_datetime(se_raw_file)
+    adjusted_se_time = se_time + timedelta(hours=hour_offset)
+    target_hour = planned_outage_hour_for_se_time(se_time, hour_offset)
+    target_date = adjusted_se_time.date()
+
+    hour_search_order = list(range(target_hour, -1, -1)) + list(range(23, target_hour, -1))
+    for hour in hour_search_order:
+        hour_matches = [
+            item
+            for item in planned_outage_files
+            if item.timestamp.hour == hour
+            and (
+                item.timestamp.date() < target_date
+                or (item.timestamp.date() == target_date and hour <= target_hour)
+            )
+        ]
+        if hour_matches:
+            return max(hour_matches, key=lambda item: item.timestamp).path
+
+    available_hours = sorted({item.timestamp.hour for item in planned_outage_files})
+    hours_text = ", ".join(f"{hour:02d}" for hour in available_hours) if available_hours else "none"
+    raise FileNotFoundError(
+        f"No planned outage XML found for {se_raw_file} at or before filename hour {target_hour:02d}. "
+        f"Searched: {format_path_for_output(searched_root)}. "
+        f"Available planned outage filename hours: {hours_text}. "
+        f"If the files use UTC+5 for this date, retry with --hour-offset 5."
+    )
+
+
+def find_planned_outage_file(
+    se_raw_file: str | Path,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    *,
+    hour_offset: int = 4,
+) -> Path:
+    """Find the planned outage XML for one SE raw file."""
+
+    se_time = parse_se_datetime(se_raw_file)
+    planned_outage_folder = planned_outage_folder_for_date(se_time, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
+    return select_planned_outage_file(
+        se_raw_file,
+        planned_outage_files,
+        hour_offset=hour_offset,
+        searched_root=planned_outage_folder,
+    )
+
+
+def build_mapping(
+    study_date: str | date | None = None,
+    *,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    expected_se_count: int | None = 4,
+) -> MisoRawMapping:
+    """Build the SE raw-to-quarter-model mapping for a study date."""
+
+    parsed_date = parse_study_date(study_date)
+    quarter_model = find_quarter_model(parsed_date, quarter_model_root)
+    se_raw_files = find_se_raw_files(parsed_date, se_root, expected_count=expected_se_count)
+    return MisoRawMapping(parsed_date, quarter_model, se_raw_files)
+
+
+def find_inputs_for_se_raw(
+    se_raw_file: str | Path,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    *,
+    hour_offset: int = 4,
+) -> SeCaseMapping:
+    """Find quarter model and planned outage XML for one SE raw file."""
+
+    se_time = parse_se_datetime(se_raw_file)
+    planned_outage_folder = planned_outage_folder_for_date(se_time, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
+    return SeCaseMapping(
+        se_raw_file=Path(se_raw_file),
+        se_time=se_time,
+        quarter_model=find_quarter_model(se_time.date(), quarter_model_root),
+        planned_outage_file=select_planned_outage_file(
+            se_raw_file,
+            planned_outage_files,
+            hour_offset=hour_offset,
+            searched_root=planned_outage_folder,
+        ),
+    )
+
+
+def build_case_mappings(
+    study_date: str | date | None = None,
+    *,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    expected_se_count: int | None = 4,
+    hour_offset: int = 4,
+) -> tuple[SeCaseMapping, ...]:
+    """Find SE raw files, matching outage XMLs, and quarter model for a date."""
+
+    parsed_date = parse_study_date(study_date)
+    raw_mapping = build_mapping(
+        parsed_date,
+        quarter_model_root=quarter_model_root,
+        se_root=se_root,
+        expected_se_count=expected_se_count,
+    )
+    planned_outage_folder = planned_outage_folder_for_date(parsed_date, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
+    return tuple(
+        SeCaseMapping(
+            se_raw_file=se_file,
+            se_time=parse_se_datetime(se_file),
+            quarter_model=raw_mapping.quarter_model,
+            planned_outage_file=select_planned_outage_file(
+                se_file,
+                planned_outage_files,
+                hour_offset=hour_offset,
+                searched_root=planned_outage_folder,
+            ),
+        )
+        for se_file in raw_mapping.se_raw_files
+    )
+
+
+def build_case_mapping_for_request(
+    date_request: str | date | None,
+    *,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    expected_se_count: int | None = 4,
+    hour_offset: int = 4,
+    outage_file_cache: dict[Path, tuple[PlannedOutageFile, ...]] | None = None,
+) -> tuple[SeCaseMapping, ...]:
+    """Map either one date or one 'date hour' request."""
+
+    parsed_date, se_time = parse_date_request(date_request)
+    if se_time is None:
+        return build_case_mappings(
+            parsed_date,
+            quarter_model_root=quarter_model_root,
+            se_root=se_root,
+            planned_outage_root=planned_outage_root,
+            expected_se_count=expected_se_count,
+            hour_offset=hour_offset,
+        )
+
+    se_file = find_se_raw_file(parsed_date, se_time, se_root)
+    quarter_model = find_quarter_model(parsed_date, quarter_model_root)
+    planned_outage_folder = planned_outage_folder_for_date(parsed_date, planned_outage_root)
+    if outage_file_cache is None:
+        planned_outage_files = list_planned_outage_files(planned_outage_folder)
+    else:
+        planned_outage_files = outage_file_cache.setdefault(
+            planned_outage_folder,
+            list_planned_outage_files(planned_outage_folder),
+        )
+
+    return (
+        SeCaseMapping(
+            se_raw_file=se_file,
+            se_time=parse_se_datetime(se_file),
+            quarter_model=quarter_model,
+            planned_outage_file=select_planned_outage_file(
+                se_file,
+                planned_outage_files,
+                hour_offset=hour_offset,
+                searched_root=planned_outage_folder,
+            ),
+        ),
+    )
+
+
+def build_case_mappings_for_dates(
+    study_dates: Sequence[str | date | None],
+    *,
+    quarter_model_root: str | Path = DEFAULT_QUARTER_MODEL_ROOT,
+    se_root: str | Path = DEFAULT_SE_ROOT,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    expected_se_count: int | None = 4,
+    hour_offset: int = 4,
+) -> tuple[SeCaseMapping, ...]:
+    """Find SE, outage XML, and quarter model mappings for multiple dates."""
+
+    mappings: list[SeCaseMapping] = []
+    outage_file_cache: dict[Path, tuple[PlannedOutageFile, ...]] = {}
+    for study_date in combine_unquoted_date_hours(study_dates):
+        mappings.extend(
+            build_case_mapping_for_request(
+                study_date,
+                quarter_model_root=quarter_model_root,
+                se_root=se_root,
+                planned_outage_root=planned_outage_root,
+                expected_se_count=expected_se_count,
+                hour_offset=hour_offset,
+                outage_file_cache=outage_file_cache,
+            )
+        )
+    return tuple(mappings)
+
+
+def print_case_mappings(case_mappings: tuple[SeCaseMapping, ...]) -> None:
+    """Print SE, outage XML, and quarter model mappings."""
+
+    for case in case_mappings:
+        print(f"SE raw file: {format_path_for_output(case.se_raw_file)}")
+        print(f"SE time: {case.se_time:%Y-%m-%d %H:%M}")
+        print(f"Quarter model: {format_path_for_output(case.quarter_model.path)}")
+        print(f"Planned outage XML: {format_path_for_output(case.planned_outage_file)}")
+        print()
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Map MISO SE raw files to planned outage XMLs and the quarter model.")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--date",
+        nargs="*",
+        help="One or more dates, or quoted date/hour pairs such as '20260414 00'. Defaults to today when omitted.",
+    )
+    source.add_argument("--se-file", help="One SE raw filename/path.")
+    parser.add_argument("--quarter-model-root", default=DEFAULT_QUARTER_MODEL_ROOT, help="Root folder for quarterly EMS models.")
+    parser.add_argument("--se-root", default=DEFAULT_SE_ROOT, help="Root folder for MISO SE raw files.")
+    parser.add_argument(
+        "--planned-outage-root",
+        default=DEFAULT_PLANNED_OUTAGE_ROOT,
+        help="Base planned outage folder; YYYYMM is appended automatically.",
+    )
+    parser.add_argument("--expected-se-count", type=int, default=4, help="Required number of same-day SE raw files.")
+    parser.add_argument("--hour-offset", type=int, default=4, help="Planned outage filename hour offset from SE hour.")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
+    try:
+        if args.se_file:
+            case_mappings = (
+                find_inputs_for_se_raw(
+                    args.se_file,
+                    quarter_model_root=args.quarter_model_root,
+                    planned_outage_root=args.planned_outage_root,
+                    hour_offset=args.hour_offset,
+                ),
+            )
+        else:
+            date_inputs = args.date or [None]
+            case_mappings = build_case_mappings_for_dates(
+                date_inputs,
+                quarter_model_root=args.quarter_model_root,
+                se_root=args.se_root,
+                planned_outage_root=args.planned_outage_root,
+                expected_se_count=args.expected_se_count,
+                hour_offset=args.hour_offset,
+            )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}")
+        return 1
+
+    print_case_mappings(case_mappings)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
