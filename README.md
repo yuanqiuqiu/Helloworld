@@ -7,6 +7,10 @@ Default roots:
 
 - Quarterly EMS models: `G:\Power\MISO\Quarterly EMS Models`
 - SE raw files: `G:\Power\MISO\MISO_SE`
+- Planned outage base folder: `G:\Power\MISO\MISO_planned_outage`
+
+The planned outage month folder is added from the SE date, for example:
+`G:\Power\MISO\MISO_planned_outage\202604`.
 
 Quarter selection:
 
@@ -19,7 +23,7 @@ Quarter selection:
 Example:
 
 ```bash
-python MISO_quarter_model_mapper.py --date 20260511
+python MISO_SE_po_EMS_mapper.py --date 20260511
 ```
 
 This looks for:
@@ -32,7 +36,7 @@ This looks for:
 Use a SE raw filename directly:
 
 ```bash
-python MISO_quarter_model_mapper.py --se-file miso_se_20260427-1800_AREVA.raw --planned-outage-root "G:\Power\MISO\Planned Outages"
+python MISO_SE_po_EMS_mapper.py --se-file miso_se_20260427-1800_AREVA.raw --planned-outage-root "G:\Power\MISO\MISO_planned_outage"
 ```
 
 The command prints plain text, for example:
@@ -41,7 +45,7 @@ The command prints plain text, for example:
 SE raw file: G:\Power\MISO\MISO_SE\2026\miso_se_20260511-0000_AREVA.raw
 SE time: 2026-05-11 00:00
 Quarter model: G:\Power\MISO\Quarterly EMS Models\202603\Mar2026_final.raw
-Planned outage XML: G:\Power\MISO\Planned Outages\...\2308_Planned_Outages_2026-...
+Planned outage XML: G:\Power\MISO\MISO_planned_outage\202605\...\2308_Planned_Outages_2026-...
 ```
 
 ## Planned outage processing
@@ -52,7 +56,7 @@ Install dependencies first:
 pip install -r requirements.txt
 ```
 
-`MISO_quarter_model_mapper.py` is the file lookup script. It maps each SE raw
+`MISO_SE_po_EMS_mapper.py` is the file lookup script. It maps each SE raw
 file to:
 
 - the quarterly model
@@ -74,12 +78,12 @@ If another dataset needs SE hour + 5 instead, pass `--hour-offset 5`.
 For one SE raw file, find both required input files:
 
 ```python
-from MISO_quarter_model_mapper import find_inputs_for_se_raw
+from MISO_SE_po_EMS_mapper import find_inputs_for_se_raw
 
 inputs = find_inputs_for_se_raw(
     se_raw_file,
     quarter_model_root=r"G:\Power\MISO\Quarterly EMS Models",
-    planned_outage_root=r"G:\Power\MISO\Planned Outages",
+    planned_outage_root=r"G:\Power\MISO\MISO_planned_outage",
 )
 ```
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from MISO_quarter_model_mapper import (
+from MISO_SE_po_EMS_mapper import (
     build_mapping,
     build_case_mappings,
     expected_quarter_model,
@@ -17,6 +17,7 @@ from MISO_quarter_model_mapper import (
     parse_planned_outage_timestamp,
     parse_se_datetime,
     parse_study_date,
+    planned_outage_folder_for_date,
     planned_outage_hour_for_se_time,
     quarter_for_date,
 )
@@ -152,49 +153,68 @@ class MisoModelMapperTests(unittest.TestCase):
 
         self.assertEqual(planned_outage_hour_for_se_time(se_time), 9)
 
+    def test_planned_outage_folder_for_date_adds_yyyymm(self):
+        self.assertEqual(
+            planned_outage_folder_for_date(date(2026, 4, 14), "/outages"),
+            Path("/outages/202604"),
+        )
+        self.assertEqual(
+            planned_outage_folder_for_date(date(2026, 4, 14), "/outages/YYYYMM"),
+            Path("/outages/202604"),
+        )
+        self.assertEqual(
+            planned_outage_folder_for_date(date(2026, 4, 14), "/outages/202604"),
+            Path("/outages/202604"),
+        )
+
     def test_find_planned_outage_file_matches_adjusted_hour(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir) / "202604"
+            root.mkdir()
             target = root / "2308_Planned_Outages_2026-04-07-04-50-00.xml"
             target.write_text("<Outages />", encoding="utf-8")
             (root / "2308_Planned_Outages_2026-04-07-05-50-00.xml").write_text("<Outages />", encoding="utf-8")
 
-            self.assertEqual(find_planned_outage_file("miso_se_20260427-0000_AREVA.raw", root), target)
+            self.assertEqual(find_planned_outage_file("miso_se_20260427-0000_AREVA.raw", temp_dir), target)
 
     def test_find_planned_outage_file_allows_same_day_minutes_after_target_hour(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir) / "202604"
+            root.mkdir()
             target = root / "2308_Planned_Outages_2026-04-14-04-50-00.xml"
             target.write_text("<Outages />", encoding="utf-8")
 
-            self.assertEqual(find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", root), target)
+            self.assertEqual(find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", temp_dir), target)
 
     def test_find_planned_outage_file_falls_back_to_previous_hour(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir) / "202604"
+            root.mkdir()
             target = root / "2308_Planned_Outages_2026-04-14-08-50-00.xml"
             target.write_text("<Outages />", encoding="utf-8")
             (root / "2308_Planned_Outages_2026-04-14-07-50-00.xml").write_text("<Outages />", encoding="utf-8")
             (root / "2308_Planned_Outages_2026-04-14-10-50-00.xml").write_text("<Outages />", encoding="utf-8")
 
-            self.assertEqual(find_planned_outage_file("miso_se_20260414-0500_AREVA.raw", root), target)
+            self.assertEqual(find_planned_outage_file("miso_se_20260414-0500_AREVA.raw", temp_dir), target)
 
     def test_find_planned_outage_file_can_fall_back_to_previous_day(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir) / "202604"
+            root.mkdir()
             target = root / "2308_Planned_Outages_2026-04-13-23-50-00.xml"
             target.write_text("<Outages />", encoding="utf-8")
             (root / "2308_Planned_Outages_2026-04-14-01-50-00.xml").write_text("<Outages />", encoding="utf-8")
 
-            self.assertEqual(find_planned_outage_file("miso_se_20260413-2000_AREVA.raw", root), target)
+            self.assertEqual(find_planned_outage_file("miso_se_20260413-2000_AREVA.raw", temp_dir), target)
 
     def test_find_planned_outage_file_error_shows_available_hours(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir) / "202604"
+            root.mkdir()
             (root / "2308_Planned_Outages_2026-04-14-05-50-00.xml").write_text("<Outages />", encoding="utf-8")
 
             with self.assertRaisesRegex(FileNotFoundError, "at or before filename hour 04.*Available planned outage filename hours.*05"):
-                find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", root)
+                find_planned_outage_file("miso_se_20260414-0000_AREVA.raw", temp_dir)
 
     def test_find_inputs_for_se_raw_returns_quarter_model_and_planned_outage_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -205,8 +225,9 @@ class MisoModelMapperTests(unittest.TestCase):
             model_file.write_text("raw", encoding="utf-8")
 
             outage_root = root / "outages"
-            outage_root.mkdir()
-            outage_file = outage_root / "2308_Planned_Outages_2026-04-07-09-50-00.xml"
+            outage_folder = outage_root / "202604"
+            outage_folder.mkdir(parents=True)
+            outage_file = outage_folder / "2308_Planned_Outages_2026-04-07-09-50-00.xml"
             outage_file.write_text("<Outages />", encoding="utf-8")
 
             result = find_inputs_for_se_raw("miso_se_20260427-0500_AREVA.raw", model_root, outage_root)
@@ -229,9 +250,10 @@ class MisoModelMapperTests(unittest.TestCase):
                 (se_folder / f"miso_se_20260427-{hour}_AREVA.raw").write_text("raw", encoding="utf-8")
 
             outage_root = root / "outages"
-            outage_root.mkdir()
+            outage_folder = outage_root / "202604"
+            outage_folder.mkdir(parents=True)
             for hour in ("0400", "1000", "1600", "2200"):
-                (outage_root / f"2308_Planned_Outages_2026-04-07-{hour[:2]}-50-00.xml").write_text(
+                (outage_folder / f"2308_Planned_Outages_2026-04-07-{hour[:2]}-50-00.xml").write_text(
                     "<Outages />",
                     encoding="utf-8",
                 )

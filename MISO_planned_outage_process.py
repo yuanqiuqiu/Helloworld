@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from MISO_quarter_model_mapper import parse_se_datetime
+from MISO_SE_po_EMS_mapper import parse_se_datetime
 
 COLUMN_NAMES = {
     "OUTAGE_REQUEST_ID": "Outage_Request_ID",

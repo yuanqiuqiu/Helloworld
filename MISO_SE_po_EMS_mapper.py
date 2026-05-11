@@ -17,7 +17,7 @@ from typing import Sequence
 
 DEFAULT_QUARTER_MODEL_ROOT = r"G:\Power\MISO\Quarterly EMS Models"
 DEFAULT_SE_ROOT = r"G:\Power\MISO\MISO_SE"
-DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\Planned Outages"
+DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\MISO_planned_outage"
 SE_RAW_RE = re.compile(r"^miso_se_(?P<date>\d{8})-(?P<time>\d{4})_AREVA\.raw$", re.IGNORECASE)
 PLANNED_OUTAGE_RE = re.compile(
     r"^\d+_Planned_Outages_(?P<stamp>\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.xml$",
@@ -98,6 +98,23 @@ def planned_outage_hour_for_se_time(se_time: datetime, hour_offset: int = 4) -> 
     """Return planned-outage filename hour. Default follows the examples: SE hour + 4."""
 
     return (se_time + timedelta(hours=hour_offset)).hour
+
+
+def planned_outage_folder_for_date(
+    study_date: date | datetime,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+) -> Path:
+    """Return the planned outage folder for a date: planned_outage_root/YYYYMM."""
+
+    yyyymm = f"{study_date.year}{study_date.month:02d}"
+    root_text = str(planned_outage_root)
+    if "YYYYMM" in root_text:
+        return Path(root_text.replace("YYYYMM", yyyymm))
+
+    last_part = re.split(r"[\\/]", root_text.rstrip("\\/"))[-1]
+    if last_part == yyyymm:
+        return Path(root_text)
+    return Path(planned_outage_root) / yyyymm
 
 
 def parse_study_date(value: str | date | None) -> date:
@@ -297,12 +314,14 @@ def find_planned_outage_file(
 ) -> Path:
     """Find the planned outage XML for one SE raw file."""
 
-    planned_outage_files = list_planned_outage_files(planned_outage_root)
+    se_time = parse_se_datetime(se_raw_file)
+    planned_outage_folder = planned_outage_folder_for_date(se_time, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
     return select_planned_outage_file(
         se_raw_file,
         planned_outage_files,
         hour_offset=hour_offset,
-        searched_root=planned_outage_root,
+        searched_root=planned_outage_folder,
     )
 
 
@@ -331,7 +350,8 @@ def find_inputs_for_se_raw(
     """Find quarter model and planned outage XML for one SE raw file."""
 
     se_time = parse_se_datetime(se_raw_file)
-    planned_outage_files = list_planned_outage_files(planned_outage_root)
+    planned_outage_folder = planned_outage_folder_for_date(se_time, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
     return SeCaseMapping(
         se_raw_file=Path(se_raw_file),
         se_time=se_time,
@@ -340,7 +360,7 @@ def find_inputs_for_se_raw(
             se_raw_file,
             planned_outage_files,
             hour_offset=hour_offset,
-            searched_root=planned_outage_root,
+            searched_root=planned_outage_folder,
         ),
     )
 
@@ -363,7 +383,8 @@ def build_case_mappings(
         se_root=se_root,
         expected_se_count=expected_se_count,
     )
-    planned_outage_files = list_planned_outage_files(planned_outage_root)
+    planned_outage_folder = planned_outage_folder_for_date(parsed_date, planned_outage_root)
+    planned_outage_files = list_planned_outage_files(planned_outage_folder)
     return tuple(
         SeCaseMapping(
             se_raw_file=se_file,
@@ -373,7 +394,7 @@ def build_case_mappings(
                 se_file,
                 planned_outage_files,
                 hour_offset=hour_offset,
-                searched_root=planned_outage_root,
+                searched_root=planned_outage_folder,
             ),
         )
         for se_file in raw_mapping.se_raw_files
@@ -398,7 +419,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     source.add_argument("--se-file", help="One SE raw filename/path.")
     parser.add_argument("--quarter-model-root", default=DEFAULT_QUARTER_MODEL_ROOT, help="Root folder for quarterly EMS models.")
     parser.add_argument("--se-root", default=DEFAULT_SE_ROOT, help="Root folder for MISO SE raw files.")
-    parser.add_argument("--planned-outage-root", default=DEFAULT_PLANNED_OUTAGE_ROOT, help="Root folder for planned outage XML files.")
+    parser.add_argument(
+        "--planned-outage-root",
+        default=DEFAULT_PLANNED_OUTAGE_ROOT,
+        help="Base planned outage folder; YYYYMM is appended automatically.",
+    )
     parser.add_argument("--expected-se-count", type=int, default=4, help="Required number of same-day SE raw files.")
     parser.add_argument("--hour-offset", type=int, default=4, help="Planned outage filename hour offset from SE hour.")
     return parser.parse_args(argv)
