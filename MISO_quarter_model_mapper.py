@@ -237,11 +237,26 @@ def find_se_raw_files(
     return files
 
 
-def find_planned_outage_file(
+def list_planned_outage_files(planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT) -> tuple[PlannedOutageFile, ...]:
+    """Read planned outage XML filenames from one folder."""
+
+    files = []
+    for path in Path(planned_outage_root).glob("*_Planned_Outages_*.xml"):
+        if not path.is_file():
+            continue
+        try:
+            files.append(PlannedOutageFile(path, parse_planned_outage_timestamp(path)))
+        except ValueError:
+            continue
+    return tuple(files)
+
+
+def select_planned_outage_file(
     se_raw_file: str | Path,
-    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    planned_outage_files: Sequence[PlannedOutageFile],
     *,
     hour_offset: int = 4,
+    searched_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
 ) -> Path:
     """Find the closest planned outage XML at or before the target filename hour."""
 
@@ -250,23 +265,11 @@ def find_planned_outage_file(
     target_hour = planned_outage_hour_for_se_time(se_time, hour_offset)
     target_date = adjusted_se_time.date()
 
-    root = Path(planned_outage_root)
-    candidates: list[PlannedOutageFile] = []
-    for path in root.glob("**/*_Planned_Outages_*.xml"):
-        if not path.is_file():
-            continue
-        try:
-            outage_time = parse_planned_outage_timestamp(path)
-        except ValueError:
-            continue
-        item = PlannedOutageFile(path, outage_time)
-        candidates.append(item)
-
     hour_search_order = list(range(target_hour, -1, -1)) + list(range(23, target_hour, -1))
     for hour in hour_search_order:
         hour_matches = [
             item
-            for item in candidates
+            for item in planned_outage_files
             if item.timestamp.hour == hour
             and (
                 item.timestamp.date() < target_date
@@ -276,13 +279,30 @@ def find_planned_outage_file(
         if hour_matches:
             return max(hour_matches, key=lambda item: item.timestamp).path
 
-    available_hours = sorted({item.timestamp.hour for item in candidates})
+    available_hours = sorted({item.timestamp.hour for item in planned_outage_files})
     hours_text = ", ".join(f"{hour:02d}" for hour in available_hours) if available_hours else "none"
     raise FileNotFoundError(
         f"No planned outage XML found for {se_raw_file} at or before filename hour {target_hour:02d}. "
-        f"Searched: {format_path_for_output(root)}. "
+        f"Searched: {format_path_for_output(searched_root)}. "
         f"Available planned outage filename hours: {hours_text}. "
         f"If the files use UTC+5 for this date, retry with --hour-offset 5."
+    )
+
+
+def find_planned_outage_file(
+    se_raw_file: str | Path,
+    planned_outage_root: str | Path = DEFAULT_PLANNED_OUTAGE_ROOT,
+    *,
+    hour_offset: int = 4,
+) -> Path:
+    """Find the planned outage XML for one SE raw file."""
+
+    planned_outage_files = list_planned_outage_files(planned_outage_root)
+    return select_planned_outage_file(
+        se_raw_file,
+        planned_outage_files,
+        hour_offset=hour_offset,
+        searched_root=planned_outage_root,
     )
 
 
@@ -311,11 +331,17 @@ def find_inputs_for_se_raw(
     """Find quarter model and planned outage XML for one SE raw file."""
 
     se_time = parse_se_datetime(se_raw_file)
+    planned_outage_files = list_planned_outage_files(planned_outage_root)
     return SeCaseMapping(
         se_raw_file=Path(se_raw_file),
         se_time=se_time,
         quarter_model=find_quarter_model(se_time.date(), quarter_model_root),
-        planned_outage_file=find_planned_outage_file(se_raw_file, planned_outage_root, hour_offset=hour_offset),
+        planned_outage_file=select_planned_outage_file(
+            se_raw_file,
+            planned_outage_files,
+            hour_offset=hour_offset,
+            searched_root=planned_outage_root,
+        ),
     )
 
 
@@ -337,12 +363,18 @@ def build_case_mappings(
         se_root=se_root,
         expected_se_count=expected_se_count,
     )
+    planned_outage_files = list_planned_outage_files(planned_outage_root)
     return tuple(
         SeCaseMapping(
             se_raw_file=se_file,
             se_time=parse_se_datetime(se_file),
             quarter_model=raw_mapping.quarter_model,
-            planned_outage_file=find_planned_outage_file(se_file, planned_outage_root, hour_offset=hour_offset),
+            planned_outage_file=select_planned_outage_file(
+                se_file,
+                planned_outage_files,
+                hour_offset=hour_offset,
+                searched_root=planned_outage_root,
+            ),
         )
         for se_file in raw_mapping.se_raw_files
     )
