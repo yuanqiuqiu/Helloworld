@@ -20,7 +20,7 @@ DEFAULT_SE_ROOT = r"G:\Power\MISO\MISO_SE"
 DEFAULT_PLANNED_OUTAGE_ROOT = r"G:\Power\MISO\Planned Outages"
 SE_RAW_RE = re.compile(r"^miso_se_(?P<date>\d{8})-(?P<time>\d{4})_AREVA\.raw$", re.IGNORECASE)
 PLANNED_OUTAGE_RE = re.compile(
-    r"^2308_Planned_Outages_(?P<stamp>\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.xml$",
+    r"^\d+_Planned_Outages_(?P<stamp>\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.xml$",
     re.IGNORECASE,
 )
 
@@ -85,7 +85,7 @@ def parse_se_datetime(value: str | Path) -> datetime:
 
 
 def parse_planned_outage_timestamp(path: str | Path) -> datetime:
-    """Parse timestamp from 2308_Planned_Outages_YYYY-MM-DD-HH-MM-SS.xml."""
+    """Parse timestamp from ####_Planned_Outages_YYYY-MM-DD-HH-MM-SS.xml."""
 
     file_name = re.split(r"[\\/]", str(path))[-1]
     match = PLANNED_OUTAGE_RE.match(file_name)
@@ -248,20 +248,33 @@ def find_planned_outage_file(
     se_time = parse_se_datetime(se_raw_file)
     adjusted_se_time = se_time + timedelta(hours=hour_offset)
     target_hour = planned_outage_hour_for_se_time(se_time, hour_offset)
+    target_date = adjusted_se_time.date()
 
+    root = Path(planned_outage_root)
+    candidates: list[PlannedOutageFile] = []
     matches: list[PlannedOutageFile] = []
-    for path in Path(planned_outage_root).glob("**/2308_Planned_Outages_*.xml"):
+    for path in root.glob("**/*_Planned_Outages_*.xml"):
         if not path.is_file():
             continue
         try:
             outage_time = parse_planned_outage_timestamp(path)
         except ValueError:
             continue
-        if outage_time.hour == target_hour and outage_time <= adjusted_se_time:
-            matches.append(PlannedOutageFile(path, outage_time))
+        if outage_time.date() <= target_date:
+            item = PlannedOutageFile(path, outage_time)
+            candidates.append(item)
+            if outage_time.hour == target_hour:
+                matches.append(item)
 
     if not matches:
-        raise FileNotFoundError(f"No planned outage XML found for {se_raw_file} with filename hour {target_hour:02d}")
+        available_hours = sorted({item.timestamp.hour for item in candidates})
+        hours_text = ", ".join(f"{hour:02d}" for hour in available_hours) if available_hours else "none"
+        raise FileNotFoundError(
+            f"No planned outage XML found for {se_raw_file} with filename hour {target_hour:02d}. "
+            f"Searched: {format_path_for_output(root)}. "
+            f"Available planned outage filename hours on/before {target_date:%Y-%m-%d}: {hours_text}. "
+            f"If the files use UTC+5 for this date, retry with --hour-offset 5."
+        )
     return max(matches, key=lambda item: item.timestamp).path
 
 
